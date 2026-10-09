@@ -294,9 +294,13 @@ body { width: 1080px; height: 1350px; overflow: hidden; font-family: Poppins, sa
 </div>
 
 <script>
+// Vitesse globale de l'animation (1 = timing d'origine, 1.6 = 60 % plus rapide).
+const SPEED = 1.6;
+for (const a of document.getAnimations()) a.playbackRate = SPEED;
+
 // Mode capture : toutes les animations sont figées et pilotées image par image.
 window.seek = (ms) => {
-  for (const a of document.getAnimations()) { a.pause(); a.currentTime = ms; }
+  for (const a of document.getAnimations()) { a.pause(); a.currentTime = ms * SPEED; }
 };
 </script>
 </body>
