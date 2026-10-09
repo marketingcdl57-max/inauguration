@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Inauguration – Christophe LAVENIR</title>
+<meta name="viewport" content="width=1080">
+<style>
+@font-face { font-family: Poppins; font-weight: 400; src: url(fonts/poppins-400.woff2) format("woff2"); }
+@font-face { font-family: Poppins; font-weight: 500; src: url(fonts/poppins-500.woff2) format("woff2"); }
+@font-face { font-family: Poppins; font-weight: 600; src: url(fonts/poppins-600.woff2) format("woff2"); }
+@font-face { font-family: Poppins; font-weight: 700; src: url(fonts/poppins-700.woff2) format("woff2"); }
+@font-face { font-family: Poppins; font-weight: 800; src: url(fonts/poppins-800.woff2) format("woff2"); }
+
+:root {
+  --cyan: #1bb9e1;
+  --blue: #00a1e4;
+  --violet: #762282;
+  --brand: linear-gradient(90deg, #00a1e4, #762282);
+  --out: cubic-bezier(.16, 1, .3, 1);
+  --back: cubic-bezier(.34, 1.56, .64, 1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { background: #111a33; }
+body { width: 1080px; height: 1350px; overflow: hidden; font-family: Poppins, sans-serif; }
+
+#stage {
+  position: relative; width: 1080px; height: 1350px; overflow: hidden;
+  background: #111931;
+}
+.abs { position: absolute; }
+
+/* Toutes les animations partent de leur état initial (fill both) */
+.a { animation-fill-mode: both; animation-duration: .9s; animation-timing-function: var(--out); }
+
+/* ---------- Fond bleu ---------- */
+#sky {
+  left: 0; top: 0; width: 1080px; height: 1008px; overflow: hidden;
+  background: linear-gradient(180deg,
+    #1bb9e1 0, #1bb9e1 710px, #1cb5dc 725px, #20a9ce 755px, #2293b7 785px,
+    #277daa 815px, #29719e 830px, #285e7b 860px, #254a67 890px,
+    #223a54 920px, #1c2b46 950px, #16203a 980px, #111931 1008px);
+  animation: sky-in .8s var(--out) both;
+}
+@keyframes sky-in { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0 0 0 0); } }
+
+.swoosh { fill: none; stroke: #fff; }
+#sw1 { stroke-width: 220; opacity: .06; animation: drift1 14s ease-in-out infinite alternate; transform-origin: 900px 300px; }
+#sw2 { stroke-width: 160; opacity: .06; animation: drift2 12s ease-in-out infinite alternate; transform-origin: 300px 800px; }
+#sw3 { stroke-width: 90;  opacity: .05; animation: drift1 10s ease-in-out -3s infinite alternate; transform-origin: 600px 500px; }
+@keyframes drift1 { from { transform: rotate(-4deg) translateX(-20px); } to { transform: rotate(4deg) translateX(30px); } }
+@keyframes drift2 { from { transform: rotate(3deg) translateY(20px); } to { transform: rotate(-3deg) translateY(-30px); } }
+
+/* reflet lumineux qui balaie le fond */
+#glint {
+  left: -600px; top: 0; width: 400px; height: 1008px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.18), transparent);
+  transform: skewX(-20deg);
+  animation: glint 1.6s ease-in-out 6.2s both;
+}
+@keyframes glint { from { left: -600px; } to { left: 1300px; } }
+
+/* ---------- Logo ---------- */
+#logo { left: 18px; top: 33px; width: 388px; }
+#logo { animation: logo-in 1s var(--out) .35s both; }
+@keyframes logo-in { from { opacity: 0; transform: translateY(-30px) scale(.9); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+
+/* ---------- Pastille « Journée d'inauguration » ---------- */
+#pill {
+  left: 445px; top: 63px; width: 580px; height: 79px; border-radius: 40px; background: #fff;
+  box-shadow: 0 10px 30px rgba(0, 60, 110, .15);
+  animation: from-right 1s var(--out) .6s both;
+}
+@keyframes from-right { from { transform: translateX(700px); } to { transform: none; } }
+#pill .line { left: 67px; top: 39px; width: 78px; height: 2px; background: var(--cyan); transform-origin: left;
+  animation: grow .7s var(--out) 1.2s both; }
+#pill .txt { left: 168px; top: 20px; font: 700 31px/1 Poppins; color: var(--cyan); white-space: nowrap;
+  animation: fade-left .7s var(--out) 1.3s both; }
+@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes fade-left { from { opacity: 0; transform: translateX(25px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Intervenant ---------- */
+#name { left: 34px; top: 246px; font: 700 66px/1.1 Poppins; color: #fff; white-space: nowrap; letter-spacing: .5px;
+  text-shadow: 0 4px 24px rgba(0, 70, 120, .18); }
+.mask { display: inline-block; overflow: hidden; vertical-align: top; padding: 0 2px 6px; }
+.mask > span { display: inline-block; animation: rise 1s var(--out) both; }
+@keyframes rise { from { transform: translateY(110%); } to { transform: none; } }
+#role { left: 40px; top: 328px; font: 400 43px/1.1 Poppins; color: #fff; letter-spacing: 1px;
+  animation: fade-up .8s var(--out) 2.05s both; }
+@keyframes fade-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+
+#acteon { left: 39px; top: 395px; width: 271px; height: 88px; overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 60, 110, .15);
+  animation: pop .8s var(--back) 2.3s both; }
+#acteon img { display: block; width: 100%; }
+@keyframes pop { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
+
+/* ---------- Carte conférence ---------- */
+#card { left: 497px; top: 395px; width: 544px; height: 180px; border-radius: 22px; background: #fff;
+  box-shadow: 0 14px 40px rgba(0, 60, 110, .18);
+  animation: card-in 1s var(--out) 2.6s both; transform-origin: right center; }
+@keyframes card-in { from { opacity: 0; transform: translateX(120px) scale(.92); } to { opacity: 1; transform: none; } }
+#card .line { left: 15px; top: 41px; width: 85px; height: 2px; background: var(--cyan); transform-origin: left;
+  animation: grow .7s var(--out) 3.1s both; }
+#card .kicker { left: 114px; top: 24px; font: 700 31px/1 Poppins; color: var(--cyan); letter-spacing: 7px;
+  animation: spacing 1.1s var(--out) 3.1s both; white-space: nowrap; }
+@keyframes spacing { from { opacity: 0; letter-spacing: 22px; } to { opacity: 1; letter-spacing: 7px; } }
+#card .title { left: 0; width: 544px; top: 72px; text-align: center; font: 700 39px/1.08 Poppins; color: var(--cyan); }
+#card .title .mask > span { animation-duration: .9s; }
+
+/* ---------- Horaire conférence ---------- */
+#time { left: 604px; top: 590px; height: 62px; display: flex; align-items: center; gap: 17px; }
+#clock { width: 62px; height: 62px; border-radius: 50%; background: #fff; position: relative;
+  animation: pop .7s var(--back) 3.6s both; }
+#clock i { position: absolute; left: 29px; width: 5px; border-radius: 3px; background: var(--cyan); transform-origin: 50% 100%; }
+#clock .h { top: 13px; height: 19px; animation: spin-h 1.4s var(--out) 3.8s both; }
+@keyframes spin-h { from { transform: rotate(-360deg); } to { transform: rotate(0); } }
+#clock .m { top: 29px; left: 29px; width: 18px; height: 5px; transform-origin: 2.5px 50%; animation: spin-m 1.4s var(--out) 3.8s both; }
+@keyframes spin-m { from { transform: rotate(-1080deg); } to { transform: none; } }
+#time .t { font: 700 46px/1 Poppins; color: #fff; white-space: nowrap; animation: fade-left .8s var(--out) 3.85s both; }
+
+/* ---------- Ordinateurs ---------- */
+#laptops { left: 190px; top: 720px; width: 660px; height: 175px; }
+#laptops .lp { position: absolute; inset: 0; background: url(img/laptops.png) no-repeat 0 0 / 660px 175px; }
+#laptops .c { clip-path: inset(0 219px 0 240px); animation: lap-c 1.2s var(--out) 4.1s both; z-index: 2; }
+#laptops .l { clip-path: inset(0 420px 0 0);    animation: lap-l 1.2s var(--out) 4.45s both; }
+#laptops .r { clip-path: inset(0 0 0 441px);    animation: lap-r 1.2s var(--out) 4.45s both; }
+@keyframes lap-c { from { opacity: 0; transform: translateY(160px) scale(.85); } to { opacity: 1; transform: none; } }
+@keyframes lap-l { from { opacity: 0; transform: translate(140px, 40px) scale(.8); } to { opacity: 1; transform: none; } }
+@keyframes lap-r { from { opacity: 0; transform: translate(-140px, 40px) scale(.8); } to { opacity: 1; transform: none; } }
+#laptops .float { position: absolute; inset: 0; animation: float 3s ease-in-out 5.6s infinite alternate; }
+@keyframes float { from { transform: translateY(0); } to { transform: translateY(-10px); } }
+#halo { left: 270px; top: 740px; width: 500px; height: 160px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(27,185,225,.55), transparent);
+  filter: blur(10px); animation: halo 1.4s ease-out 4.3s both; }
+@keyframes halo { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: none; } }
+
+/* ---------- Bas de page ---------- */
+#footer { left: 0; top: 1008px; width: 1080px; height: 342px; background: #fff; overflow: hidden;
+  animation: slide-up 1s var(--out) 4.8s both; }
+@keyframes slide-up { from { transform: translateY(342px); } to { transform: none; } }
+#dots { inset: 0; background-image: radial-gradient(circle, #e3d2e5 2.2px, transparent 2.6px); background-size: 13px 13px;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, rgba(0,0,0,.35) 30%, #000 100%);
+  mask-image: linear-gradient(180deg, transparent 0, rgba(0,0,0,.35) 30%, #000 100%);
+  animation: fade 1.4s ease-out 5.2s both; }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+#info { left: 85px; top: 72px; width: 902px; height: 106px; border-radius: 53px; }
+#info svg.border { position: absolute; left: 0; top: 0; overflow: visible; }
+#info svg.border rect { stroke-dasharray: 2000; stroke-dashoffset: 2000; animation: draw 1.6s var(--out) 5.1s both; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+#info .fill { position: absolute; inset: 2px; border-radius: 51px; background: #fff; }
+
+.grad { background: var(--brand); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+#cal { left: 89px; top: 15px; width: 46px; height: 46px; animation: pop .6s var(--back) 5.4s both; }
+#d29 { left: 145px; top: 4px; font: 800 62px/1 Poppins; letter-spacing: -4px;
+  background: linear-gradient(90deg, #1e81cb 10%, #6c2d8a 90%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: flip .8s var(--back) 5.5s both; transform-origin: 50% 100%; }
+@keyframes flip { from { opacity: 0; transform: perspective(400px) rotateX(90deg); } to { opacity: 1; transform: none; } }
+#oct { left: 100px; top: 74px; font: 700 21px/1 Poppins; color: #158bd3; letter-spacing: .5px; animation: fade-up .6s var(--out) 5.7s both; }
+
+.div { top: 13px; width: 3px; height: 82px; transform-origin: top; animation: grow-y .6s var(--out) both; }
+@keyframes grow-y { from { transform: scaleY(0); } to { transform: none; } }
+#div1 { left: 257px; background: #3f5db0; animation-delay: 5.6s; }
+#div2 { left: 543px; background: #5c3f9c; animation-delay: 5.8s; }
+
+#clk2 { left: 291px; top: 23px; width: 62px; height: 62px; animation: pop .6s var(--back) 5.75s both; }
+#clk2 .hand { transform-origin: 31px 31px; animation: tick 1.2s var(--out) 5.9s both; }
+@keyframes tick { from { transform: rotate(-360deg); } to { transform: none; } }
+#hours { left: 372px; top: 39px; font: 700 27px/1 Poppins; color: #1090d7; white-space: nowrap; animation: fade-left .6s var(--out) 5.9s both; }
+
+#pin { left: 568px; top: 14px; width: 48px; height: 66px; animation: drop .9s var(--out) 6s both; }
+@keyframes drop { 0% { opacity: 0; transform: translateY(-60px); } 60% { opacity: 1; transform: translateY(4px); } 80% { transform: translateY(-6px); } 100% { opacity: 1; transform: none; } }
+#pin-shadow { left: 577px; top: 79px; width: 30px; height: 8px; border-radius: 50%; background: rgba(0, 161, 228, .25); animation: fade .9s 6.3s both; }
+#addr { left: 637px; top: 22px; font: 700 25px/1.08 Poppins; letter-spacing: .5px; white-space: nowrap;
+  background: linear-gradient(90deg, #0a96dc, #613792 75%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: fade-left .7s var(--out) 6.15s both; }
+
+#contacts { left: 0; top: 239px; width: 1080px; height: 40px; }
+.ct { position: absolute; top: 0; display: flex; align-items: center; gap: 8px; font: 400 21px/1 Poppins; color: #0997dd; white-space: nowrap;
+  animation: fade-up .6s var(--out) both; }
+.ct .ic { width: 33px; height: 33px; border-radius: 50%; background: #0997dd; display: grid; place-items: center; }
+#ct1 { left: 102px; animation-delay: 6.4s; }
+#ct2 { left: 470px; animation-delay: 6.55s; }
+#ct3 { left: 742px; animation-delay: 6.7s; }
+
+/* Pulsations douces en boucle une fois tout posé */
+#pin svg { animation: bob 1.6s ease-in-out 7.2s infinite alternate; }
+@keyframes bob { from { transform: none; } to { transform: translateY(-5px); } }
+#pill .shine, #card .shine { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
+#pill .shine::after, #card .shine::after { content: ""; position: absolute; top: 0; bottom: 0; width: 120px; left: -200px;
+  background: linear-gradient(90deg, transparent, rgba(27,185,225,.18), transparent); transform: skewX(-20deg);
+  animation: shine 1.3s ease-in-out both; }
+#pill .shine::after { animation-delay: 7s; }
+#card .shine::after { animation-delay: 7.4s; }
+@keyframes shine { from { left: -200px; } to { left: 120%; } }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- Fond -->
+  <div id="sky" class="abs">
+    <svg class="abs" width="1080" height="1008" viewBox="0 0 1080 1008" style="left:0;top:0;-webkit-mask-image:linear-gradient(#000 55%,transparent 85%);mask-image:linear-gradient(#000 55%,transparent 85%)">
+      <path id="sw1" class="swoosh" d="M780 -60 C 1150 120, 1120 420, 820 560 S 380 760, 330 1100" />
+      <path id="sw2" class="swoosh" d="M-150 560 C 120 640, 260 760, 210 1080" />
+      <path id="sw3" class="swoosh" d="M1200 280 C 980 330, 860 400, 820 360" />
+    </svg>
+    <div id="glint" class="abs"></div>
+  </div>
+
+  <img id="logo" class="abs" src="img/logo-cdl-blanc.png" alt="Comptoir Dentaire Lorrain">
+
+  <div id="pill" class="abs">
+    <div class="shine"></div>
+    <div class="line abs"></div>
+    <div class="txt abs">Journée d’inauguration</div>
+  </div>
+
+  <div id="name" class="abs">
+    <span class="mask"><span style="animation-delay:1.45s">Christophe</span></span><span class="mask" style="margin-left:16px"><span style="animation-delay:1.6s">LAVENIR</span></span>
+  </div>
+  <div id="role" class="abs">Intervenant</div>
+  <div id="acteon" class="abs"><img src="img/acteon.png" alt="acteon"></div>
+
+  <div id="card" class="abs">
+    <div class="shine"></div>
+    <div class="line abs"></div>
+    <div class="kicker abs">CONFÉRENCE</div>
+    <div class="title abs">
+      <span class="mask"><span style="animation-delay:3.3s">Démonstration des</span></span><br>
+      <span class="mask"><span style="animation-delay:3.45s">logiciels AIS et OPUS</span></span>
+    </div>
+  </div>
+
+  <div id="time" class="abs">
+    <div id="clock"><i class="h"></i><i class="m"></i></div>
+    <div class="t">12h - 12h30</div>
+  </div>
+
+  <div id="halo" class="abs"></div>
+  <div id="laptops" class="abs">
+    <div class="float">
+      <div class="lp l"></div><div class="lp r"></div><div class="lp c"></div>
+    </div>
+  </div>
+
+  <!-- Bas de page -->
+  <div id="footer" class="abs">
+    <div id="dots" class="abs"></div>
+
+    <div id="info" class="abs">
+      <svg class="border" width="902" height="106">
+        <defs><linearGradient id="g" x1="0" x2="1"><stop offset="0" stop-color="#00a1e4"/><stop offset="1" stop-color="#762282"/></linearGradient></defs>
+        <rect x="1" y="1" width="900" height="104" rx="52" fill="none" stroke="url(#g)" stroke-width="2" pathLength="2000"/>
+      </svg>
+
+      <svg id="cal" class="abs" viewBox="0 0 46 46">
+        <rect x="2" y="6" width="42" height="37" rx="5" fill="none" stroke="#00a1e4" stroke-width="3"/>
+        <path d="M2 15h42" stroke="#00a1e4" stroke-width="3"/>
+        <path d="M13 2v8M33 2v8" stroke="#00a1e4" stroke-width="3" stroke-linecap="round"/>
+        <g fill="#00a1e4"><rect x="9" y="21" width="5" height="4"/><rect x="17" y="21" width="5" height="4"/><rect x="25" y="21" width="5" height="4"/><rect x="33" y="21" width="5" height="4"/>
+        <rect x="9" y="30" width="5" height="4"/><rect x="17" y="30" width="5" height="4"/><rect x="25" y="30" width="5" height="4"/><rect x="33" y="30" width="5" height="4"/></g>
+      </svg>
+      <div id="d29" class="abs">29</div>
+      <div id="oct" class="abs">OCTOBRE</div>
+
+      <div id="div1" class="abs div"></div>
+
+      <svg id="clk2" class="abs" viewBox="0 0 62 62">
+        <circle cx="31" cy="31" r="28" fill="none" stroke="#00a1e4" stroke-width="4"/>
+        <path class="hand" d="M31 15v17l9 7" fill="none" stroke="#00a1e4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <div id="hours" class="abs">10H - 18H</div>
+
+      <div id="div2" class="abs div"></div>
+
+      <div id="pin-shadow" class="abs"></div>
+      <div id="pin" class="abs">
+        <svg viewBox="0 0 48 66" width="48" height="66">
+          <path d="M24 2C12 2 2 11.5 2 24c0 15 22 40 22 40s22-25 22-40C46 11.5 36 2 24 2z" fill="#00a1e4"/>
+          <circle cx="24" cy="23" r="8.5" fill="#fff"/>
+        </svg>
+      </div>
+      <div id="addr" class="abs">360 RUE DU<br>RUISSEAU 57155</div>
+    </div>
+
+    <div id="contacts" class="abs">
+      <div id="ct1" class="ct"><span class="ic"><svg width="19" height="14" viewBox="0 0 19 14"><rect x="1" y="1" width="17" height="12" rx="1.5" fill="none" stroke="#fff" stroke-width="1.8"/><path d="M1.5 1.8 9.5 8l8-6.2" fill="none" stroke="#fff" stroke-width="1.8"/></svg></span>commandes@cdlorrain.com</div>
+      <div id="ct2" class="ct"><span class="ic"><svg width="21" height="21" viewBox="0 0 22 22" fill="none" stroke="#fff" stroke-width="1.6"><circle cx="11" cy="11" r="9"/><ellipse cx="11" cy="11" rx="4" ry="9"/><path d="M2 11h18M3.5 6.5h15M3.5 15.5h15"/></svg></span>www.cdlorrain.com</div>
+      <div id="ct3" class="ct"><span class="ic"><svg width="16" height="16" viewBox="0 0 24 24"><path fill="#fff" d="M6.6 10.8a15.2 15.2 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg></span>03 87 63 50 00</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Mode capture : toutes les animations sont figées et pilotées image par image.
+window.seek = (ms) => {
+  for (const a of document.getAnimations()) { a.pause(); a.currentTime = ms; }
+};
+</script>
+</body>
+</html>
