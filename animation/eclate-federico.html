@@ -15,19 +15,19 @@
 <img id="src" src="affiche-federico.png" alt="">
 <canvas id="c" width="1080" height="1350"></canvas>
 <script>
-// Effet « éclaté » : l'affiche apparaît, se fissure, explose violemment
-// (flash, onde de choc, tremblement, étincelles), puis les éclats
-// reviennent la reconstituer avec un second impact.
+// Effet « éclaté » : dès la première image, une explosion projette les
+// éclats de l'affiche depuis le centre (flash, onde de choc, tremblement,
+// étincelles), puis ils reviennent la reconstituer avec un second impact.
+// L'affiche n'est jamais visible entière avant l'explosion.
 const W = 1080, H = 1350;
 const img = document.getElementById('src');
 const ctx = document.getElementById('c').getContext('2d');
 
 // Réglages (secondes)
 const COLS = 12, ROWS = 15;     // grille des éclats (2 triangles par case)
-const T_CRACK = 0.35;           // les fissures apparaissent
-const T_BOOM = 0.75;            // explosion
+const T_BOOM = 0.12;            // explosion (après un bref point lumineux)
 const OUT = 0.8;                // durée de l'expulsion
-const T_BACK = 1.3;             // début du retour des éclats
+const T_BACK = 1.05;            // début du retour des éclats
 const SPREAD = 0.45;            // étalement des retours
 const FLY = 0.8;                // durée du retour de chaque éclat
 const IMPACT = T_BACK + SPREAD + FLY;   // affiche reconstituée
@@ -82,19 +82,19 @@ const burst = (n, vmin, vmax) => Array.from({ length: n }, () => {
 const sparksBoom = burst(220, 500, 2200);
 const sparksImpact = burst(120, 300, 1100);
 
-// Déplacement d'un éclat : 0 = en place, 1 = au plus loin
-function offset(s, t) {
-  const out = easeOut(clamp((t - T_BOOM - s.outDelay) / OUT));
-  const back = easeOut(clamp((t - s.backDelay) / FLY));
-  return out * (1 - back);
-}
-
+// Trajectoire d'un éclat : projeté depuis le centre de l'explosion vers sa
+// position dispersée, puis ramené à sa place dans l'affiche.
 function drawShard(s, t) {
-  const k = offset(s, t);
+  const u = easeOut(clamp((t - T_BOOM - s.outDelay) / OUT));
+  if (u <= 0) return;
+  const b = easeOut(clamp((t - s.backDelay) / FLY));
+  const ox = lerp(cx0, s.cx + s.dx, u), oy = lerp(cy0, s.cy + s.dy, u);
+  const orot = s.rot * lerp(2.5, 1, u), osc = lerp(.05, s.s0, u);
+  const k = 1 - b;
   ctx.save();
-  ctx.translate(s.cx + s.dx * k, s.cy + s.dy * k);
-  ctx.rotate(s.rot * k);
-  const sc = lerp(1, s.s0, k);
+  ctx.translate(lerp(ox, s.cx, b), lerp(oy, s.cy, b));
+  ctx.rotate(orot * k);
+  const sc = lerp(osc, 1, b);
   ctx.scale(sc, sc);
   ctx.translate(-s.cx, -s.cy);
   ctx.beginPath();
@@ -156,43 +156,28 @@ function render(t) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
 
-  // apparition rapide de l'affiche intacte
-  const intro = clamp(t / .25);
+  // point lumineux qui grossit juste avant l'explosion
+  if (t < T_BOOM + .05) {
+    const q = clamp(t / T_BOOM), r = 20 + 160 * easeIn(q);
+    const g = ctx.createRadialGradient(cx0, cy0, 0, cx0, cy0, r);
+    g.addColorStop(0, '#fff'); g.addColorStop(.35, 'rgba(255,255,255,.9)');
+    g.addColorStop(.6, 'rgba(208,2,27,.6)'); g.addColorStop(1, 'rgba(208,2,27,0)');
+    ctx.fillStyle = g; ctx.fillRect(cx0 - r, cy0 - r, 2 * r, 2 * r);
+  }
 
-  // tremblement : vibration pendant les fissures, gros choc, second choc
+  // tremblement : gros choc à l'explosion, second choc à la reconstitution
   const [s1x, s1y] = shake(t, T_BOOM, 38);
   const [s2x, s2y] = shake(t, IMPACT, 22);
-  const pre = t > T_CRACK && t < T_BOOM ? 4 * Math.sin(t * 140) * (t - T_CRACK) / (T_BOOM - T_CRACK) : 0;
-  // gonflement juste avant l'explosion, coup de zoom à l'impact
-  const swell = t > T_CRACK && t < T_BOOM ? .03 * easeIn((t - T_CRACK) / (T_BOOM - T_CRACK)) : 0;
+  // coup de zoom à l'impact puis lente poussée
   const a = t - IMPACT;
-  const punch = a > 0 ? .05 * Math.exp(-a * 6) * Math.cos(a * 16) + .015 * clamp(a / 5) : 0;
-  const zoom = (lerp(.92, 1, easeOut(intro))) + swell + punch;
+  const zoom = 1 + (a > 0 ? .05 * Math.exp(-a * 6) * Math.cos(a * 16) + .015 * clamp(a / 5) : 0);
 
-  ctx.translate(W / 2 + s1x + s2x + pre, H / 2 + s1y + s2y);
+  ctx.translate(W / 2 + s1x + s2x, H / 2 + s1y + s2y);
   ctx.scale(zoom, zoom);
   ctx.translate(-W / 2, -H / 2);
 
-  if (t < T_BOOM || t > IMPACT + .03) {
-    ctx.globalAlpha = intro;
-    ctx.drawImage(img, 0, 0, W, H);
-    ctx.globalAlpha = 1;
-    // fissures qui se propagent depuis le centre
-    if (t > T_CRACK && t < T_BOOM) {
-      const q = (t - T_CRACK) / (T_BOOM - T_CRACK);
-      ctx.lineWidth = 2;
-      for (const s of shards) {
-        const d = Math.hypot(s.cx - cx0, s.cy - cy0) / maxD;
-        const v = clamp((q * 1.4 - d) * 4);
-        if (v <= 0) continue;
-        ctx.globalAlpha = v * .9;
-        ctx.strokeStyle = '#fff';
-        ctx.beginPath();
-        for (const [x, y] of s.tri) ctx.lineTo(x, y);
-        ctx.closePath(); ctx.stroke();
-      }
-      ctx.globalAlpha = 1;
-    }
+  if (t > IMPACT + .03) {
+    ctx.drawImage(img, 0, 0, W, H);       // affiche nette, sans joints
   } else {
     for (const s of shards) drawShard(s, t);
   }
