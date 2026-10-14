@@ -15,41 +15,45 @@
 <img id="src" src="affiche-federico.png" alt="">
 <canvas id="c" width="1080" height="1350"></canvas>
 <script>
-// Effet « éclaté » : l'affiche part en éclats de verre dispersés qui
-// convergent pour la reconstituer, avec flash et étincelles à l'impact.
+// Effet « éclaté » : l'affiche apparaît, se fissure, explose violemment
+// (flash, onde de choc, tremblement, étincelles), puis les éclats
+// reviennent la reconstituer avec un second impact.
 const W = 1080, H = 1350;
 const img = document.getElementById('src');
 const ctx = document.getElementById('c').getContext('2d');
 
 // Réglages (secondes)
-const COLS = 9, ROWS = 11;      // grille des éclats (2 triangles par case)
-const FLY = 1.1;                // durée du vol de chaque éclat
-const SPREAD = 0.75;            // étalement des départs
-const IMPACT = 0.05 + SPREAD + FLY;   // tout est en place
+const COLS = 12, ROWS = 15;     // grille des éclats (2 triangles par case)
+const T_CRACK = 0.35;           // les fissures apparaissent
+const T_BOOM = 0.75;            // explosion
+const OUT = 0.8;                // durée de l'expulsion
+const T_BACK = 1.3;             // début du retour des éclats
+const SPREAD = 0.45;            // étalement des retours
+const FLY = 0.8;                // durée du retour de chaque éclat
+const IMPACT = T_BACK + SPREAD + FLY;   // affiche reconstituée
 const RED = '#d0021b';
 
-// Aléatoire reproductible : même rendu à chaque export.
-let seed = 7;
+let seed = 11;
 const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
 const lerp = (a, b, t) => a + (b - a) * t;
 const clamp = (x) => Math.max(0, Math.min(1, x));
 const easeOut = (t) => 1 - Math.pow(1 - t, 4);
+const easeIn = (t) => t * t * t;
 
-// Points de la grille, légèrement décalés pour des éclats irréguliers.
 const pts = [];
 for (let j = 0; j <= ROWS; j++) {
   pts.push([]);
   for (let i = 0; i <= COLS; i++) {
     const edgeX = i === 0 || i === COLS, edgeY = j === 0 || j === ROWS;
     pts[j].push([
-      (i / COLS) * W + (edgeX ? 0 : (rnd() - .5) * W / COLS * .8),
-      (j / ROWS) * H + (edgeY ? 0 : (rnd() - .5) * H / ROWS * .8),
+      (i / COLS) * W + (edgeX ? 0 : (rnd() - .5) * W / COLS * .85),
+      (j / ROWS) * H + (edgeY ? 0 : (rnd() - .5) * H / ROWS * .85),
     ]);
   }
 }
 
-const shards = [];
 const cx0 = W / 2, cy0 = H * .45, maxD = Math.hypot(W, H) / 2;
+const shards = [];
 for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) {
   const a = pts[j][i], b = pts[j][i + 1], c = pts[j + 1][i + 1], d = pts[j + 1][i];
   const tris = rnd() < .5 ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]];
@@ -57,57 +61,93 @@ for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) {
     const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
     const cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
     const dist = Math.hypot(cx - cx0, cy - cy0);
-    const ang = Math.atan2(cy - cy0, cx - cx0) + (rnd() - .5) * .9;
-    const far = 700 + rnd() * 900;
+    const ang = Math.atan2(cy - cy0, cx - cx0) + (rnd() - .5) * .7;
+    // les éclats proches du centre partent le plus loin et le plus vite
+    const far = (250 + rnd() * 750) * (1.4 - .7 * dist / maxD);
     shards.push({
       tri, cx, cy,
       dx: Math.cos(ang) * far, dy: Math.sin(ang) * far,
-      rot: (rnd() - .5) * 7, s0: .3 + rnd() * 1.4,
-      // les éclats du centre arrivent en premier, ceux du bord ensuite
-      delay: .05 + (dist / maxD) * SPREAD * .7 + rnd() * SPREAD * .3,
+      rot: (rnd() - .5) * 14, s0: .2 + rnd() * 1.8,
+      outDelay: (dist / maxD) * .08 + rnd() * .04,
+      backDelay: T_BACK + (dist / maxD) * SPREAD * .6 + rnd() * SPREAD * .4,
     });
   }
 }
 
-// Étincelles à l'impact
-const sparks = Array.from({ length: 90 }, () => {
-  const a = rnd() * Math.PI * 2, v = 250 + rnd() * 900;
-  return { a, v, size: 1.5 + rnd() * 3.5, life: .5 + rnd() * .7, red: rnd() < .55 };
+// Gerbes d'étincelles (explosion, puis impact de reconstitution)
+const burst = (n, vmin, vmax) => Array.from({ length: n }, () => {
+  const a = rnd() * Math.PI * 2;
+  return { a, v: vmin + rnd() * (vmax - vmin), size: 1.5 + rnd() * 4, life: .45 + rnd() * .8, red: rnd() < .5 };
 });
+const sparksBoom = burst(220, 500, 2200);
+const sparksImpact = burst(120, 300, 1100);
+
+// Déplacement d'un éclat : 0 = en place, 1 = au plus loin
+function offset(s, t) {
+  const out = easeOut(clamp((t - T_BOOM - s.outDelay) / OUT));
+  const back = easeOut(clamp((t - s.backDelay) / FLY));
+  return out * (1 - back);
+}
 
 function drawShard(s, t) {
-  const p = clamp((t - s.delay) / FLY);
-  if (p <= 0) return;
-  const e = easeOut(p), k = 1 - e;
+  const k = offset(s, t);
   ctx.save();
-  ctx.globalAlpha = clamp(p * 4);
   ctx.translate(s.cx + s.dx * k, s.cy + s.dy * k);
   ctx.rotate(s.rot * k);
-  ctx.scale(lerp(s.s0, 1, e), lerp(s.s0, 1, e));
+  const sc = lerp(1, s.s0, k);
+  ctx.scale(sc, sc);
   ctx.translate(-s.cx, -s.cy);
   ctx.beginPath();
-  // triangle légèrement agrandi pour masquer les joints
-  for (const [x, y] of s.tri) {
-    const ex = x + Math.sign(x - s.cx) * .8, ey = y + Math.sign(y - s.cy) * .8;
-    ctx.lineTo(ex, ey);
-  }
+  for (const [x, y] of s.tri) ctx.lineTo(x + Math.sign(x - s.cx) * .8, y + Math.sign(y - s.cy) * .8);
   ctx.closePath();
-  ctx.save();
-  ctx.clip();
-  ctx.drawImage(img, 0, 0, W, H);
-  ctx.restore();
-  // arêtes lumineuses pendant le vol (verre brisé)
-  if (k > .02) {
-    ctx.globalAlpha = k * .9;
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.stroke();
-    ctx.globalAlpha = k * .5;
-    ctx.lineWidth = 5;
-    ctx.strokeStyle = RED;
-    ctx.stroke();
+  ctx.save(); ctx.clip(); ctx.drawImage(img, 0, 0, W, H); ctx.restore();
+  if (k > .01) {
+    const g = Math.min(1, k * 3);
+    ctx.globalAlpha = g * .5; ctx.lineWidth = 6; ctx.strokeStyle = RED; ctx.stroke();
+    ctx.globalAlpha = g; ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
   }
   ctx.restore();
+}
+
+// Tremblement amorti après un choc
+function shake(t, t0, amp) {
+  const d = t - t0;
+  if (d < 0) return [0, 0];
+  const f = amp * Math.exp(-d * 7);
+  return [f * Math.sin(d * 71), f * Math.cos(d * 53)];
+}
+
+function sparks(list, dt) {
+  if (dt < 0) return;
+  ctx.lineCap = 'round';
+  for (const p of list) {
+    const q = dt / p.life;
+    if (q >= 1) continue;
+    const d = p.v * (1 - Math.pow(1 - q, 3)) * .9;
+    const tail = p.v * .05 * (1 - q);           // traînée liée à la vitesse
+    const x = cx0 + Math.cos(p.a) * d, y = cy0 + Math.sin(p.a) * d;
+    ctx.globalAlpha = 1 - q;
+    ctx.strokeStyle = p.red ? RED : '#fff';
+    ctx.lineWidth = p.size * (1 - q * .5);
+    ctx.beginPath(); ctx.moveTo(x - Math.cos(p.a) * tail, y - Math.sin(p.a) * tail); ctx.lineTo(x, y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function shockwave(dt, dur, maxR, color, width) {
+  if (dt < 0 || dt > dur) return;
+  const q = dt / dur, r = maxR * easeOut(q);
+  ctx.globalAlpha = (1 - q) ** 1.5;
+  ctx.strokeStyle = color; ctx.lineWidth = width * (1 - q) + 2;
+  ctx.beginPath(); ctx.arc(cx0, cy0, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.globalAlpha = 1;
+}
+
+function flash(dt, dur, alpha) {
+  if (dt < 0 || dt > dur) return;
+  ctx.globalAlpha = alpha * (1 - dt / dur) ** 2;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
 }
 
 function render(t) {
@@ -116,20 +156,49 @@ function render(t) {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, W, H);
 
-  // léger « coup » de zoom à l'impact puis lente poussée
-  const after = t - IMPACT;
-  let zoom = 1;
-  if (after > 0) zoom = 1 + .035 * Math.exp(-after * 6) * Math.cos(after * 14) + .015 * clamp(after / 6);
-  ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
+  // apparition rapide de l'affiche intacte
+  const intro = clamp(t / .25);
 
-  if (after > .05) {
-    ctx.drawImage(img, 0, 0, W, H);       // affiche nette, sans joints
+  // tremblement : vibration pendant les fissures, gros choc, second choc
+  const [s1x, s1y] = shake(t, T_BOOM, 38);
+  const [s2x, s2y] = shake(t, IMPACT, 22);
+  const pre = t > T_CRACK && t < T_BOOM ? 4 * Math.sin(t * 140) * (t - T_CRACK) / (T_BOOM - T_CRACK) : 0;
+  // gonflement juste avant l'explosion, coup de zoom à l'impact
+  const swell = t > T_CRACK && t < T_BOOM ? .03 * easeIn((t - T_CRACK) / (T_BOOM - T_CRACK)) : 0;
+  const a = t - IMPACT;
+  const punch = a > 0 ? .05 * Math.exp(-a * 6) * Math.cos(a * 16) + .015 * clamp(a / 5) : 0;
+  const zoom = (lerp(.92, 1, easeOut(intro))) + swell + punch;
+
+  ctx.translate(W / 2 + s1x + s2x + pre, H / 2 + s1y + s2y);
+  ctx.scale(zoom, zoom);
+  ctx.translate(-W / 2, -H / 2);
+
+  if (t < T_BOOM || t > IMPACT + .03) {
+    ctx.globalAlpha = intro;
+    ctx.drawImage(img, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    // fissures qui se propagent depuis le centre
+    if (t > T_CRACK && t < T_BOOM) {
+      const q = (t - T_CRACK) / (T_BOOM - T_CRACK);
+      ctx.lineWidth = 2;
+      for (const s of shards) {
+        const d = Math.hypot(s.cx - cx0, s.cy - cy0) / maxD;
+        const v = clamp((q * 1.4 - d) * 4);
+        if (v <= 0) continue;
+        ctx.globalAlpha = v * .9;
+        ctx.strokeStyle = '#fff';
+        ctx.beginPath();
+        for (const [x, y] of s.tri) ctx.lineTo(x, y);
+        ctx.closePath(); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
   } else {
     for (const s of shards) drawShard(s, t);
   }
 
-  // reflet qui balaie l'affiche
-  const sw = (t - IMPACT - 1.2) / 1.1;
+  // reflet qui balaie l'affiche reconstituée
+  const sw = (t - IMPACT - .9) / 1.1;
   if (sw > 0 && sw < 1) {
     const x = lerp(-500, W + 500, sw);
     const g = ctx.createLinearGradient(x - 160, 0, x + 160, 0);
@@ -145,27 +214,16 @@ function render(t) {
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  // flash blanc à l'impact
-  if (after > 0 && after < .5) {
-    ctx.globalAlpha = .55 * (1 - after / .5) ** 2;
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, W, H);
-    ctx.globalAlpha = 1;
-  }
+  // effets de l'explosion
+  shockwave(t - T_BOOM, .7, 1500, '#fff', 40);
+  shockwave(t - T_BOOM - .06, .8, 1400, RED, 28);
+  sparks(sparksBoom, t - T_BOOM);
+  flash(t - T_BOOM, .35, .95);
 
-  // étincelles
-  if (after > 0) {
-    for (const p of sparks) {
-      const q = after / p.life;
-      if (q >= 1) continue;
-      const d = p.v * (1 - Math.pow(1 - q, 3)) * .9;
-      const x = cx0 + Math.cos(p.a) * d, y = cy0 + Math.sin(p.a) * d;
-      ctx.globalAlpha = 1 - q;
-      ctx.fillStyle = p.red ? RED : '#fff';
-      ctx.beginPath(); ctx.arc(x, y, p.size * (1 - q * .5), 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
+  // effets de la reconstitution
+  shockwave(a, .6, 1100, '#fff', 18);
+  sparks(sparksImpact, a);
+  flash(a, .45, .6);
 }
 
 // Mode capture (render.mjs) : image par image. Sinon, lecture en boucle.
