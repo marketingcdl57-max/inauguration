@@ -1,5 +1,5 @@
-// Rend index.html en vidéo MP4 (1080x1350, 30 i/s) image par image.
-// Usage : node render.mjs [durée_s] [sortie.mp4]
+// Rend une page d'animation en vidéo MP4 (1080x1350, 30 i/s) image par image.
+// Usage : [PAGE=fichier.html] node render.mjs [durée_s] [sortie.mp4]
 import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -13,7 +13,7 @@ const ONLY = process.env.FRAMES?.split(',').map(Number);   // ex. FRAMES=1,3.5 �
 
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM || undefined });
 const page = await browser.newPage({ viewport: { width: W, height: H } });
-await page.goto(pathToFileURL(path.join(dir, 'index.html')).href);
+await page.goto(pathToFileURL(path.join(dir, process.env.PAGE ?? 'index.html')).href);
 await page.evaluate(() => document.fonts.ready);
 
 if (ONLY) {

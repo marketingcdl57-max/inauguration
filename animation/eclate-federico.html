@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Inauguration – Maxim Di FEDERICO</title>
+<meta name="viewport" content="width=1080">
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+  img { display: none; }
+</style>
+</head>
+<body>
+<img id="src" src="affiche-federico.png" alt="">
+<canvas id="c" width="1080" height="1350"></canvas>
+<script>
+// Effet « éclaté » : l'affiche part en éclats de verre dispersés qui
+// convergent pour la reconstituer, avec flash et étincelles à l'impact.
+const W = 1080, H = 1350;
+const img = document.getElementById('src');
+const ctx = document.getElementById('c').getContext('2d');
+
+// Réglages (secondes)
+const COLS = 9, ROWS = 11;      // grille des éclats (2 triangles par case)
+const FLY = 1.1;                // durée du vol de chaque éclat
+const SPREAD = 0.75;            // étalement des départs
+const IMPACT = 0.05 + SPREAD + FLY;   // tout est en place
+const RED = '#d0021b';
+
+// Aléatoire reproductible : même rendu à chaque export.
+let seed = 7;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const easeOut = (t) => 1 - Math.pow(1 - t, 4);
+
+// Points de la grille, légèrement décalés pour des éclats irréguliers.
+const pts = [];
+for (let j = 0; j <= ROWS; j++) {
+  pts.push([]);
+  for (let i = 0; i <= COLS; i++) {
+    const edgeX = i === 0 || i === COLS, edgeY = j === 0 || j === ROWS;
+    pts[j].push([
+      (i / COLS) * W + (edgeX ? 0 : (rnd() - .5) * W / COLS * .8),
+      (j / ROWS) * H + (edgeY ? 0 : (rnd() - .5) * H / ROWS * .8),
+    ]);
+  }
+}
+
+const shards = [];
+const cx0 = W / 2, cy0 = H * .45, maxD = Math.hypot(W, H) / 2;
+for (let j = 0; j < ROWS; j++) for (let i = 0; i < COLS; i++) {
+  const a = pts[j][i], b = pts[j][i + 1], c = pts[j + 1][i + 1], d = pts[j + 1][i];
+  const tris = rnd() < .5 ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]];
+  for (const tri of tris) {
+    const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3;
+    const cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+    const dist = Math.hypot(cx - cx0, cy - cy0);
+    const ang = Math.atan2(cy - cy0, cx - cx0) + (rnd() - .5) * .9;
+    const far = 700 + rnd() * 900;
+    shards.push({
+      tri, cx, cy,
+      dx: Math.cos(ang) * far, dy: Math.sin(ang) * far,
+      rot: (rnd() - .5) * 7, s0: .3 + rnd() * 1.4,
+      // les éclats du centre arrivent en premier, ceux du bord ensuite
+      delay: .05 + (dist / maxD) * SPREAD * .7 + rnd() * SPREAD * .3,
+    });
+  }
+}
+
+// Étincelles à l'impact
+const sparks = Array.from({ length: 90 }, () => {
+  const a = rnd() * Math.PI * 2, v = 250 + rnd() * 900;
+  return { a, v, size: 1.5 + rnd() * 3.5, life: .5 + rnd() * .7, red: rnd() < .55 };
+});
+
+function drawShard(s, t) {
+  const p = clamp((t - s.delay) / FLY);
+  if (p <= 0) return;
+  const e = easeOut(p), k = 1 - e;
+  ctx.save();
+  ctx.globalAlpha = clamp(p * 4);
+  ctx.translate(s.cx + s.dx * k, s.cy + s.dy * k);
+  ctx.rotate(s.rot * k);
+  ctx.scale(lerp(s.s0, 1, e), lerp(s.s0, 1, e));
+  ctx.translate(-s.cx, -s.cy);
+  ctx.beginPath();
+  // triangle légèrement agrandi pour masquer les joints
+  for (const [x, y] of s.tri) {
+    const ex = x + Math.sign(x - s.cx) * .8, ey = y + Math.sign(y - s.cy) * .8;
+    ctx.lineTo(ex, ey);
+  }
+  ctx.closePath();
+  ctx.save();
+  ctx.clip();
+  ctx.drawImage(img, 0, 0, W, H);
+  ctx.restore();
+  // arêtes lumineuses pendant le vol (verre brisé)
+  if (k > .02) {
+    ctx.globalAlpha = k * .9;
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
+    ctx.stroke();
+    ctx.globalAlpha = k * .5;
+    ctx.lineWidth = 5;
+    ctx.strokeStyle = RED;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // léger « coup » de zoom à l'impact puis lente poussée
+  const after = t - IMPACT;
+  let zoom = 1;
+  if (after > 0) zoom = 1 + .035 * Math.exp(-after * 6) * Math.cos(after * 14) + .015 * clamp(after / 6);
+  ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
+
+  if (after > .05) {
+    ctx.drawImage(img, 0, 0, W, H);       // affiche nette, sans joints
+  } else {
+    for (const s of shards) drawShard(s, t);
+  }
+
+  // reflet qui balaie l'affiche
+  const sw = (t - IMPACT - 1.2) / 1.1;
+  if (sw > 0 && sw < 1) {
+    const x = lerp(-500, W + 500, sw);
+    const g = ctx.createLinearGradient(x - 160, 0, x + 160, 0);
+    g.addColorStop(0, 'rgba(255,255,255,0)');
+    g.addColorStop(.5, 'rgba(255,255,255,.22)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(x, H / 2); ctx.transform(1, 0, -.35, 1, 0, 0); ctx.translate(-x, -H / 2);
+    ctx.fillStyle = g; ctx.fillRect(x - 160, -200, 320, H + 400);
+    ctx.restore();
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // flash blanc à l'impact
+  if (after > 0 && after < .5) {
+    ctx.globalAlpha = .55 * (1 - after / .5) ** 2;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+
+  // étincelles
+  if (after > 0) {
+    for (const p of sparks) {
+      const q = after / p.life;
+      if (q >= 1) continue;
+      const d = p.v * (1 - Math.pow(1 - q, 3)) * .9;
+      const x = cx0 + Math.cos(p.a) * d, y = cy0 + Math.sin(p.a) * d;
+      ctx.globalAlpha = 1 - q;
+      ctx.fillStyle = p.red ? RED : '#fff';
+      ctx.beginPath(); ctx.arc(x, y, p.size * (1 - q * .5), 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// Mode capture (render.mjs) : image par image. Sinon, lecture en boucle.
+let live = true;
+window.seek = (ms) => { live = false; render(ms / 1000); };
+const LOOP = 7;
+const start = performance.now();
+(function tick(now) {
+  if (!live) return;
+  render(((now - start) / 1000) % LOOP);
+  requestAnimationFrame(tick);
+})(start);
+</script>
+</body>
+</html>
