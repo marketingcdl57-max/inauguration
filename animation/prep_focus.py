@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Découpe l'affiche « Focus Impression » pour l'animation « éclatée ».
+"""Découpe une affiche « imprimantes SprintRay » pour l'animation « éclatée ».
 
-Produit dans img/focus/ :
+Usage : python3 prep_focus.py [affiche.png] [dossier_sortie]
+        (par défaut affiche-focus.png → img/focus/)
+
+Produit dans le dossier de sortie :
   - fond.png : l'affiche sans la carte Conférence, l'horaire et les imprimantes
   - carte.png, heure.png, midas.png, pro.png, nano.png : éléments détourés
   - pieces.json : position de chaque élément dans l'affiche
@@ -10,12 +13,15 @@ de chaque ligne est lue en x=1077.
 """
 import json
 import os
+import sys
 import numpy as np
 from PIL import Image
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-OUT = os.path.join(ROOT, "img/focus")
-P = np.asarray(Image.open(os.path.join(ROOT, "affiche-focus.png")).convert("RGB")).astype(int)
+SRC = sys.argv[1] if len(sys.argv) > 1 else "affiche-focus.png"
+OUT = os.path.join(ROOT, sys.argv[2] if len(sys.argv) > 2 else "img/focus")
+os.makedirs(OUT, exist_ok=True)
+P = np.asarray(Image.open(os.path.join(ROOT, SRC)).convert("RGB")).astype(int)
 H, W, _ = P.shape
 bg = P[:, 1077, :]
 diff = np.abs(P - bg[:, None, :]).max(2)

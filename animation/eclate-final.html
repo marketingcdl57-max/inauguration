@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Inauguration – Dentisterie numérique à 360°</title>
+<meta name="viewport" content="width=1080">
+<style>
+  * { margin: 0; padding: 0; }
+  html, body { background: #000; overflow: hidden; }
+  canvas { display: block; }
+  img { display: none; }
+</style>
+</head>
+<body>
+<img id="affiche" src="affiche-final.png" alt="">
+<img id="fond" src="img/final/fond.png" alt="">
+<img id="carte" src="img/final/carte.png" alt="">
+<img id="heure" src="img/final/heure.png" alt="">
+<img id="midas" src="img/final/midas.png" alt="">
+<img id="pro" src="img/final/pro.png" alt="">
+<img id="nano" src="img/final/nano.png" alt="">
+<canvas id="c" width="1080" height="1350"></canvas>
+<script>
+// Effet « éclaté » sobre pour le visuel final : dès la première image, une
+// détonation lumineuse disperse la carte conférence, l'horaire et les trois
+// imprimantes en morceaux (vue éclatée au ralenti). La carte se recompose,
+// puis chaque imprimante, puis l'horaire ; un reflet balaie l'affiche.
+// Les éléments sont découpés par : python3 prep_focus.py affiche-final.png img/final
+const W = 1080, H = 1350;
+const $ = (id) => document.getElementById(id);
+const ctx = $('c').getContext('2d');
+const RED = '208,2,27';
+
+// Position et taille dans l'affiche (img/final/pieces.json) — connues d'avance,
+// car les images ne sont pas forcément chargées quand ce script s'exécute.
+const POS = {
+  carte: [490, 272, 536, 200], heure: [568, 476, 352, 72],
+  midas: [356, 515, 180, 345], nano: [843, 540, 215, 299], pro: [556, 617, 301, 371],
+};
+
+// Chronologie (secondes)
+const T_BURST = 0.3;              // détonation
+const OUT = 0.9;                  // dispersion
+const C = [720, 590];             // centre de la détonation
+const LOOP = 8;
+
+let seed = 21;
+const rnd = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const easeOutExpo = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+const easeInOut = (t) => (t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+
+// Découpe un élément en triangles irréguliers.
+//  - 'eclats' : fragments de verre dispersés (texte)
+//  - 'vue'    : morceaux écartés autour de l'objet (vue éclatée des imprimantes)
+function shatter(id, cols, rows, { back, spread, fly, mode }) {
+  const im = $(id), [x0, y0, w, h] = POS[id];
+  const pcx = x0 + w / 2, pcy = y0 + h / 2;
+  const pts = [];
+  for (let j = 0; j <= rows; j++) {
+    pts.push([]);
+    for (let i = 0; i <= cols; i++) {
+      const ex = i === 0 || i === cols, ey = j === 0 || j === rows;
+      pts[j].push([x0 + (i / cols) * w + (ex ? 0 : (rnd() - .5) * w / cols * .7),
+                   y0 + (j / rows) * h + (ey ? 0 : (rnd() - .5) * h / rows * .7)]);
+    }
+  }
+  const list = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
+    const a = pts[j][i], b = pts[j][i + 1], c = pts[j + 1][i + 1], d = pts[j + 1][i];
+    for (const tri of (rnd() < .5 ? [[a, b, c], [a, c, d]] : [[a, b, d], [b, c, d]])) {
+      const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3, cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+      let dx, dy, rot;
+      if (mode === 'eclats') {
+        const ang = Math.atan2(cy - C[1], cx - C[0]) + (rnd() - .5) * .8, far = 60 + rnd() * 150;
+        dx = Math.cos(ang) * far; dy = Math.sin(ang) * far; rot = (rnd() - .5) * 2.2;
+        dy = Math.max(dy, 255 - cy + rnd() * 30);   // ne pas recouvrir le nom de l'intervenant
+      } else {
+        const k = .22 + rnd() * .2, push = 14 + rnd() * 22, ang = Math.atan2(cy - pcy, cx - pcx);
+        dx = (cx - pcx) * k + Math.cos(ang) * push; dy = (cy - pcy) * k + Math.sin(ang) * push;
+        rot = (rnd() - .5) * .5;
+      }
+      list.push({ im, x0, y0, tri, cx, cy, dx, dy, rot, mode, fly,
+        // dérive lente pendant le ralenti
+        vx: (rnd() - .5) * 14, vy: (rnd() - .5) * 14, vr: (rnd() - .5) * .12,
+        outDelay: rnd() * .08,
+        back: back + (mode === 'eclats' ? (i / cols) * spread * .75 + rnd() * spread * .25 : rnd() * spread) });
+    }
+  }
+  return list;
+}
+
+const shards = [
+  // imprimantes d'abord, texte par-dessus
+  ...shatter('pro',   3, 4, { back: 2.05, spread: .2,  fly: .6,  mode: 'vue' }),
+  ...shatter('nano',  3, 3, { back: 2.4,  spread: .2,  fly: .6,  mode: 'vue' }),
+  ...shatter('midas', 2, 4, { back: 1.7,  spread: .2,  fly: .6,  mode: 'vue' }),
+  ...shatter('carte', 7, 3, { back: 1.2,  spread: .45, fly: .75, mode: 'eclats' }),
+  ...shatter('heure', 5, 2, { back: 2.75, spread: .3,  fly: .65, mode: 'eclats' }),
+];
+const DONE = Math.max(...shards.map((s) => s.back + s.fly));   // tout est recomposé
+// fin du remontage de chaque élément : reflet lumineux sur l'élément
+const GLINTS = ['carte', 'midas', 'pro', 'nano', 'heure'].map((id) => ({
+  id, t: Math.max(...shards.filter((s) => s.im === $(id)).map((s) => s.back + s.fly)),
+}));
+
+function drawShard(s, t) {
+  const u = easeOutExpo(clamp((t - T_BURST - s.outDelay) / OUT));
+  if (u <= 0) return;
+  const q = clamp((t - s.back) / s.fly), b = easeInOut(q), k = 1 - b;
+  const drift = Math.max(0, t - T_BURST);
+  const ex = s.cx + s.dx + s.vx * drift, ey = s.cy + s.dy + s.vy * drift;
+  const ox = lerp(C[0], ex, u), oy = lerp(C[1], ey, u);
+  ctx.save();
+  ctx.translate(lerp(ox, s.cx, b), lerp(oy, s.cy, b));
+  ctx.rotate((s.rot * u + s.vr * drift) * k);
+  const sc = lerp(lerp(.2, 1, u), 1, b);
+  ctx.scale(sc, sc);
+  ctx.translate(-s.cx, -s.cy);
+  ctx.beginPath();
+  for (const [x, y] of s.tri) ctx.lineTo(x + Math.sign(x - s.cx) * .7, y + Math.sign(y - s.cy) * .7);
+  ctx.closePath();
+  ctx.globalAlpha = clamp(u * 3);
+  ctx.save(); ctx.clip(); ctx.drawImage(s.im, s.x0, s.y0); ctx.restore();
+  if (s.mode === 'eclats' && k > .01) {      // arête de verre discrète
+    ctx.globalAlpha = .45 * k * clamp(u * 3);
+    ctx.lineWidth = 1; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Fines particules lumineuses (poussière de verre)
+const dust = Array.from({ length: 140 }, () => ({
+  a: rnd() * Math.PI * 2, v: 120 + rnd() * 620, r: .8 + rnd() * 1.8,
+  life: 1.1 + rnd() * 1.1, red: rnd() < .35, tw: rnd() * 6,
+}));
+function drawDust(dt) {
+  if (dt < 0) return;
+  for (const p of dust) {
+    const q = dt / p.life;
+    if (q >= 1) continue;
+    const d = p.v * easeOut(Math.min(1, q * 1.4));
+    const x = C[0] + Math.cos(p.a) * d, y = C[1] + Math.sin(p.a) * d + 30 * q * q;
+    const al = (1 - q) * (.6 + .4 * Math.sin(dt * 12 + p.tw));
+    ctx.fillStyle = p.red ? `rgba(255,90,100,${al})` : `rgba(255,255,255,${al})`;
+    ctx.beginPath(); ctx.arc(x, y, p.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// Reflet lumineux diagonal limité à une zone
+function sweep(p, x0, y0, w, h, alpha, band) {
+  if (p <= 0 || p >= 1) return;
+  const x = lerp(x0 - band * 2, x0 + w + band * 2, easeInOut(p));
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.clip();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(x, y0 + h / 2); ctx.transform(1, 0, -.4, 1, 0, 0);
+  const g = ctx.createLinearGradient(-band, 0, band, 0);
+  g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(.5, `rgba(255,255,255,${alpha})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(-band, -h, band * 2, h * 2);
+  ctx.restore();
+}
+
+function render(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // caméra : léger recul à la détonation, puis lente poussée continue
+  const kick = t > T_BURST ? .025 * Math.exp(-(t - T_BURST) * 5) : 0;
+  const zoom = 1.03 - .03 * easeOut(clamp(t / 1.2)) + kick + .015 * clamp((t - DONE) / (LOOP - DONE));
+  ctx.translate(W / 2, H / 2); ctx.scale(zoom, zoom); ctx.translate(-W / 2, -H / 2);
+
+  const a = t - DONE;
+  if (t > T_BURST) {
+    // le reste de l'affiche apparaît en douceur
+    ctx.globalAlpha = easeOut(clamp((t - T_BURST) / .7));
+    ctx.drawImage($('fond'), 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    // halo rouge discret derrière les imprimantes
+    const glow = clamp((t - T_BURST) / .5) * (1 - clamp((t - DONE + .8) / .8));
+    if (glow > 0) {
+      const g = ctx.createRadialGradient(720, 760, 0, 720, 760, 430);
+      g.addColorStop(0, `rgba(${RED},${.22 * glow})`); g.addColorStop(1, `rgba(${RED},0)`);
+      ctx.fillStyle = g; ctx.fillRect(290, 330, 860, 860);
+    }
+    for (const s of shards) drawShard(s, t);
+    // fondu vers l'affiche d'origine pour effacer les joints
+    if (a > 0) {
+      ctx.globalAlpha = easeOut(clamp(a / .25));
+      ctx.drawImage($('affiche'), 0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+    // reflet sur chaque élément au moment où il se recompose
+    for (const g of GLINTS) {
+      const [x, y, w, h] = POS[g.id];
+      sweep((t - g.t + .1) / .55, x, y, w, h, .2, 60);
+    }
+    // grand reflet final sur toute l'affiche
+    sweep((a - .5) / 1.3, 0, 0, W, H, .16, 170);
+  }
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  // lueur qui se concentre avant la détonation (fusée horizontale fine)
+  if (t < T_BURST + .5) {
+    const pre = easeOut(clamp(t / T_BURST)), post = clamp((t - T_BURST) / .5);
+    const al = pre * (1 - post);
+    if (al > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.translate(C[0], C[1]); ctx.scale(1, .06 + .1 * post);
+      let r = 60 + 520 * pre + 400 * post;
+      let g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, `rgba(255,255,255,${al})`); g.addColorStop(.25, `rgba(255,120,130,${.6 * al})`); g.addColorStop(1, 'rgba(208,2,27,0)');
+      ctx.fillStyle = g; ctx.fillRect(-r, -r, 2 * r, 2 * r);
+      ctx.restore();
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      r = 18 + 50 * pre;
+      g = ctx.createRadialGradient(C[0], C[1], 0, C[0], C[1], r);
+      g.addColorStop(0, `rgba(255,255,255,${al})`); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g; ctx.fillRect(C[0] - r, C[1] - r, 2 * r, 2 * r);
+      ctx.restore();
+    }
+  }
+
+  // détonation : halo doux, anneau fin, poussière lumineuse
+  const d = t - T_BURST;
+  if (d > 0 && d < .7) {
+    const q = d / .7, r = 200 + 900 * easeOut(q);
+    const g = ctx.createRadialGradient(C[0], C[1], 0, C[0], C[1], r);
+    g.addColorStop(0, `rgba(255,255,255,${.75 * (1 - q) ** 2})`);
+    g.addColorStop(.4, `rgba(${RED},${.25 * (1 - q) ** 2})`);
+    g.addColorStop(1, `rgba(${RED},0)`);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  if (d > 0 && d < 1) {
+    const q = d / 1;
+    ctx.globalAlpha = .55 * (1 - q) ** 2;
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 + 3 * (1 - q);
+    ctx.beginPath(); ctx.arc(C[0], C[1], 40 + 950 * easeOutExpo(q), 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  drawDust(d);
+}
+
+// Mode capture (render.mjs) : image par image. Sinon, lecture en boucle.
+let live = true;
+window.seek = (ms) => { live = false; render(ms / 1000); };
+const start = performance.now();
+(function tick(now) {
+  if (!live) return;
+  render(((now - start) / 1000) % LOOP);
+  requestAnimationFrame(tick);
+})(start);
+</script>
+</body>
+</html>
