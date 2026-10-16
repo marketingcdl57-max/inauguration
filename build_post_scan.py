@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Variante « scan » du post conférence Scanner intra-oral.
 
-Format 1080x1350, 30 i/s, 7 s. Clin d'œil au sujet de la conférence :
+Format 1080x1350, 30 i/s, 7 s. Un même effet pour plusieurs visuels
+(voir POSTS). Clin d'œil au sujet de la conférence :
 le visuel est numérisé comme une empreinte intra-orale. Sur un écran
 sombre quadrillé où l'on devine à peine l'affiche, une ligne laser cyan
 balaie l'image de haut en bas ; juste derrière elle, le visuel apparaît
@@ -15,20 +16,32 @@ import subprocess
 import sys
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 
-from build_post_anime import (H, LAYERS, SRC, W, FPS,
-                              build_layers, led_glow, prog, shine)
+from build_post_anime import H, W, FPS, prog
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "video/conference-sidi-mani-scan.mp4")
+# Visuels : encarts traversés par le reflet (boîte, début) et anneau LED.
+POSTS = {
+    "sidi-mani": dict(
+        src="posts/conference-sidi-mani.webp",
+        out="video/conference-sidi-mani-scan.mp4",
+        shine=[((480, 55, 1040, 150), 3.15), ((495, 274, 1040, 480), 3.4)],
+        led=(385, 779)),
+    "abdel": dict(
+        src="posts/conference-abdel.webp",
+        out="video/conference-abdel-scan.mp4",
+        shine=[((480, 55, 1040, 150), 3.15), ((486, 231, 1036, 430), 3.4)],
+        led=(403, 799)),
+}
+BASE = np.array([118, 34, 130], np.float32)   # violet du fond
 DUR = 7.0
 CYAN = np.array([70, 225, 255], np.float32)
 NAVY = np.array([10, 12, 30], np.float32)
 SCAN_T, SCAN_D = 0.45, 2.3            # balayage : début, durée
 SCAN_FROM, SCAN_TO = -40, H + 300     # la bande de révélation sort de l'image
 WIRE, REVEAL = 70, 280                # contours seuls, puis passage à la couleur (px)
-SHINE = [("pill", 3.15), ("conf", 3.4)]
+SHINE_D = 0.8
 ZOOM0, SETTLE = 1.05, 6.4
 
 
@@ -78,14 +91,55 @@ def scan_frame(t, img, dark, wire):
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def frame(t, img, dark, wire, layers, final):
-    canvas = Image.fromarray(scan_frame(t, img, dark, wire)).convert("RGBA")
-    boxes = {L["name"]: L["box"] for L in LAYERS}
-    for name, start in SHINE:
-        shine(canvas, layers[name], boxes[name], t, start)
-    if t > SCAN_T + SCAN_D:
-        led_glow(canvas, t)
-    out = canvas.convert("RGB")
+def glass_masks(img, post):
+    """Masque de chaque encart vitré : rectangle arrondi x opacité du verre."""
+    diff = np.clip(np.abs(img - BASE).max(axis=2) / 60.0, 0, 1)
+    masks = []
+    for box, start in post["shine"]:
+        x0, y0, x1, y1 = box
+        r = Image.new("L", (x1 - x0, y1 - y0), 0)
+        ImageDraw.Draw(r).rounded_rectangle((0, 0, x1 - x0 - 1, y1 - y0 - 1),
+                                            radius=(y1 - y0) // 4, fill=255)
+        m = np.asarray(r) / 255.0 * diff[y0:y1, x0:x1]
+        masks.append((box, start, m))
+    return masks
+
+
+def shine(out, box, start, m, t):
+    """Reflet diagonal qui traverse l'encart."""
+    p = prog(t, start, SHINE_D)
+    if p <= 0 or p >= 1:
+        return
+    x0, y0, x1, y1 = box
+    h, w = m.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    pos = -h + p * (w + 2 * h)
+    band = np.exp(-(((xx + yy * 0.5) - pos) / 38.0) ** 2) * 0.55 * m
+    sub = out[y0:y1, x0:x1]
+    out[y0:y1, x0:x1] = sub + (255 - sub) * band[..., None]
+
+
+def led_glow(out, t, led):
+    """Halo cyan qui pulse sur l'anneau lumineux du scanner."""
+    start = SCAN_T + SCAN_D
+    if t < start:
+        return
+    k = 0.5 + 0.5 * math.sin((t - start) * 2 * math.pi / 1.4 - math.pi / 2)
+    k *= min(1.0, (t - start) / 0.5)
+    r = 70
+    yy, xx = np.mgrid[0:2 * r, 0:2 * r]
+    a = np.exp(-((xx - r) ** 2 + ((yy - r) / 0.45) ** 2) / (2 * 22 ** 2)) * 0.75 * k
+    x0, y0 = led[0] - r, led[1] - r
+    sub = out[y0:y0 + 2 * r, x0:x0 + 2 * r]
+    out[y0:y0 + 2 * r, x0:x0 + 2 * r] = sub + (CYAN - sub) * a[..., None]
+
+
+def frame(t, img, dark, wire, masks, post, final):
+    arr = scan_frame(t, img, dark, wire).astype(np.float32)
+    for box, start, m in masks:
+        shine(arr, box, start, m, t)
+    led_glow(arr, t, post["led"])
+    out = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
     z = 1 + (ZOOM0 - 1) * (1 - (1 - (1 - min(1.0, t / SETTLE)) ** 3))
     if z > 1.0005:
         cw, ch = W / z, H / z
@@ -97,24 +151,28 @@ def frame(t, img, dark, wire, layers, final):
     return out
 
 
-def main():
-    final = Image.open(SRC).convert("RGB")
+def render(post):
+    final = Image.open(os.path.join(ROOT, post["src"])).convert("RGB")
+    assert final.size == (W, H), final.size
     img, dark, wire = prepare(final)
-    _, layers, _ = build_layers(final)
-    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    masks = glass_masks(img, post)
+    out = os.path.join(ROOT, post["out"])
+    os.makedirs(os.path.dirname(out), exist_ok=True)
     ff = subprocess.Popen(
         ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
          "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
          "-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p",
-         "-movflags", "+faststart", OUT],
+         "-movflags", "+faststart", out],
         stdin=subprocess.PIPE)
     for i in range(int(DUR * FPS)):
-        ff.stdin.write(frame(i / FPS, img, dark, wire, layers, final).tobytes())
+        ff.stdin.write(frame(i / FPS, img, dark, wire, masks, post, final).tobytes())
     ff.stdin.close()
     if ff.wait():
         sys.exit("ffmpeg a échoué")
-    print(f"→ {OUT} ({DUR:.1f}s)")
+    print(f"→ {out} ({DUR:.1f}s)")
 
 
 if __name__ == "__main__":
-    main()
+    # Usage : build_post_scan.py [visuel ...]   (par défaut : tous)
+    for key in sys.argv[1:] or POSTS:
+        render(POSTS[key])
