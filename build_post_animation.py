@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime l'affiche « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC).
 
-Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 30 i/s, 10 s.
+Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s, 6 s.
 
 L'affiche est découpée en calques : chaque élément (logo, pastille,
 titre, badge GC, horaires, produit, bandeau infos) est extrait par
@@ -10,8 +10,8 @@ harmonique des zones occupées). Chaque calque vaut donc
 (affiche - plaque) et s'ajoute au fond : une fois tous les éléments
 posés, l'image finale est exactement l'affiche d'origine.
 
-Séquence : fondu d'ouverture avec léger recul de caméra, entrées
-décalées des éléments, puis vie de l'image (reflet mint sur « Collage »,
+Séquence rythmée : tous les éléments sont en place en moins de 2 s
+(entrées courtes en ease-out exponentiel, sans rebond), puis vie de l'image (reflet mint sur « Collage »,
 pulsation du badge horaire, produit qui flotte doucement).
 """
 import math
@@ -22,7 +22,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
-W, H, FPS, DUR = 1080, 1350, 30, 10.0
+W, H, FPS, DUR = 1080, 1350, 60, 6.0
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, "assets/post-collage.webp")
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "video/post-collage-anime.mp4")
@@ -206,49 +206,50 @@ def render(poster, plate, layers, panel, py):
         t = i / FPS
         f = plate.copy()
 
-        def enter(name, start, dur=0.7, **kw):
+        def enter(name, start, dur=0.45, **kw):
             p = prog(t, start, dur)
             add_layer(f, layers[name], **{k: v(p) for k, v in kw.items()},
-                      alpha=clamp(p * 1.6))
+                      alpha=clamp(p * 2.5))
 
-        enter("logo", 0.35, 0.8, dx=lambda p: -50 * (1 - out_cubic(p)))
-        enter("pill", 0.5, 0.8, dx=lambda p: 50 * (1 - out_cubic(p)))
-        p = prog(t, 0.9, 0.8)
-        add_layer(f, layers["tp"], wipe=out_cubic(p), alpha=1.0 if p > 0 else 0)
-        p = prog(t, 1.1, 0.9)
-        add_layer(f, layers["collage"], dy=110 * K * (1 - out_expo(p)), clip=True,
+        e = lambda p: 1 - out_expo(p)          # reste à parcourir, très nerveux
+        enter("logo", 0.10, dx=lambda p: -70 * e(p))
+        enter("pill", 0.16, dx=lambda p: 70 * e(p))
+        p = prog(t, 0.28, 0.40)
+        add_layer(f, layers["tp"], wipe=out_expo(p), alpha=1.0 if p > 0 else 0)
+        p = prog(t, 0.34, 0.55)
+        add_layer(f, layers["collage"], dy=150 * K * e(p), clip=True,
                   alpha=1.0 if p > 0 else 0)
-        enter("part", 1.55, 0.6, dy=lambda p: -14 * (1 - out_cubic(p)))
-        enter("gc", 1.7, 0.7, scale=lambda p: 0.82 + 0.18 * out_back(p))
-        enter("sub", 2.0, 0.8, dy=lambda p: 26 * (1 - out_cubic(p)))
-        enter("anim", 2.35, 0.8, dx=lambda p: -40 * (1 - out_cubic(p)))
-        enter("time", 2.55, 0.7, scale=lambda p: 0.7 + 0.3 * out_back(p))
-        enter("halo", 2.55, 0.7)
+        enter("part", 0.52, 0.35, dy=lambda p: -16 * e(p))
+        enter("gc", 0.58, scale=lambda p: 0.88 + 0.12 * out_expo(p))
+        enter("sub", 0.70, dy=lambda p: 28 * e(p))
+        enter("anim", 0.84, dx=lambda p: -60 * e(p))
+        enter("time", 0.92, scale=lambda p: 0.82 + 0.18 * out_back(p, 1.2))
+        enter("halo", 0.92)
         # produit : monte et se pose, puis flotte doucement
-        p = prog(t, 2.85, 1.1)
-        float_amp = 3.5 * in_out(prog(t, 3.9, 0.8))
-        bob = float_amp * math.sin(2 * math.pi * (t - 3.9) / 3.2)
-        add_layer(f, layers["prod"], dy=70 * (1 - out_cubic(p)) + bob,
-                  scale=0.94 + 0.06 * out_cubic(p), alpha=clamp(p * 1.4))
+        p = prog(t, 1.00, 0.60)
+        float_amp = 3.0 * in_out(prog(t, 1.6, 0.6))
+        bob = float_amp * math.sin(2 * math.pi * (t - 1.6) / 2.6)
+        add_layer(f, layers["prod"], dy=90 * e(p) + bob,
+                  scale=0.93 + 0.07 * out_expo(p), alpha=clamp(p * 2.2))
 
         # bandeau d'informations qui monte
-        p = out_cubic(prog(t, 3.5, 0.9))
+        p = out_expo(prog(t, 1.25, 0.55))
         top = py + int(round((H - py) * (1 - p)))
         if top < H:
             f[top:] = panel[:H - top]
 
         # reflets
-        shine(f, BOXES["collage"], 4.7, 1.1, t, glyph_collage, MINT, 0.9)
-        shine(f, BOXES["time"], 5.4, 0.9, t, glyph_time, white, 0.55)
-        shine(f, BOXES["collage"], 8.0, 1.1, t, glyph_collage, MINT, 0.9)
+        shine(f, BOXES["collage"], 2.0, 0.7, t, glyph_collage, MINT, 0.9)
+        shine(f, BOXES["time"], 2.45, 0.55, t, glyph_time, white, 0.55)
+        shine(f, BOXES["collage"], 4.9, 0.7, t, glyph_collage, MINT, 0.9)
 
         img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
         # pulsations : badge horaire et point de la pastille
-        for t0 in (5.5, 7.6):
-            q = prog(t, t0, 1.2)
+        for t0 in (2.5, 4.4):
+            q = prog(t, t0, 0.8)
             if 0 < q < 1:
-                ring(img, TIME_PILL, 26 * out_cubic(q), 0.8 * (1 - q), 62, 3)
-        q = ((t - 1.4) % 1.6) / 1.2 if t > 1.4 else 1
+                ring(img, TIME_PILL, 24 * out_cubic(q), 0.85 * (1 - q), 62, 3)
+        q = ((t - 0.7) % 1.2) / 0.9 if t > 0.7 else 1
         if q < 1:
             dx_, dy_ = DOT[0] * K, DOT[1] * K
             r = 5 + 14 * out_cubic(q)
@@ -257,14 +258,14 @@ def render(poster, plate, layers, panel, py):
                                        outline=(94, 234, 190, int(200 * (1 - q))), width=2)
             img.alpha_composite(ov)
 
-        # caméra : léger recul + fondu d'ouverture
+        # caméra : recul rapide + fondu d'ouverture
         img = img.convert("RGB")
-        z = 1 + 0.06 * (1 - in_out(prog(t, 0, 4.0)))
+        z = 1 + 0.07 * (1 - out_expo(prog(t, 0, 1.6)))
         if z > 1.0001:
             cw, ch = W / z, H / z
             img = img.resize((W, H), Image.BICUBIC,
                              box=((W - cw) / 2, (H - ch) * 0.35, (W + cw) / 2, (H - ch) * 0.35 + ch))
-        fade = out_cubic(prog(t, 0, 0.7))
+        fade = out_cubic(prog(t, 0, 0.25))
         if fade < 1:
             img = Image.blend(Image.new("RGB", (W, H)), img, fade)
         ff.stdin.write(img.tobytes())
