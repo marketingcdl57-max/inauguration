@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
-"""Anime l'affiche « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC).
+"""Anime les affiches des travaux pratiques de la journée d'inauguration.
+
+    python3 build_post_animation.py [collage|lea] [sortie.mp4]
+
+  - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
+  - lea     : « Léa FERRAND — TP Collage », version avec photo
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s, 6 s.
 
 L'affiche est découpée en calques : chaque élément (logo, pastille,
-titre, badge GC, horaires, produit, bandeau infos) est extrait par
+titre, badge GC, horaires, produit, photo...) est extrait par
 différence avec une « plaque » de fond reconstruite (remplissage
 harmonique des zones occupées). Chaque calque vaut donc
 (affiche - plaque) et s'ajoute au fond : une fois tous les éléments
-posés, l'image finale est exactement l'affiche d'origine.
+posés, l'image finale est exactement l'affiche d'origine. Le bandeau
+blanc d'informations, lui, monte depuis le bas.
 
 Séquence rythmée : tous les éléments sont en place en moins de 2 s
-(entrées courtes en ease-out exponentiel, sans rebond), puis vie de l'image (reflet mint sur « Collage »,
-pulsation du badge horaire, produit qui flotte doucement).
+(entrées courtes en ease-out exponentiel, sans rebond), puis vie de
+l'image (reflets, pulsations, produit qui flotte doucement).
 """
 import math
 import os
@@ -24,27 +30,9 @@ from PIL import Image, ImageDraw, ImageFilter
 
 W, H, FPS, DUR = 1080, 1350, 60, 6.0
 ROOT = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(ROOT, "assets/post-collage.webp")
-OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "video/post-collage-anime.mp4")
-K = W / 1600                       # coordonnées ci-dessous en pixels de l'affiche 1600x2000
+K = 1.0                            # échelle affiche source -> vidéo (fixée par l'affiche choisie)
 MINT = np.array([94, 234, 190], np.float32)
-
-BOXES = {
-    "logo":    (85, 75, 610, 212),
-    "pill":    (880, 95, 1510, 192),
-    "tp":      (90, 315, 645, 362),
-    "collage": (88, 385, 1030, 667),
-    "part":    (1145, 396, 1508, 434),
-    "gc":      (1102, 438, 1514, 576),
-    "sub":     (90, 680, 1355, 808),
-    "anim":    (90, 832, 580, 952),
-    "time":    (996, 812, 1524, 966),
-    "halo":    (1260, 966, 1524, 995),  # bas du halo du badge horaire, à droite du produit
-    "prod":    (340, 966, 1260, 1515),
-}
-PANEL_Y = 1515                     # début du bandeau blanc d'informations
-TIME_PILL = (1013, 830, 1505, 955) # badge « 14h30 – 15h » (sans le halo)
-DOT = (933, 143)                   # point de la pastille « Journée d'inauguration »
+WHITE = np.array([255, 255, 255], np.float32)
 
 
 def box(b):
@@ -102,17 +90,18 @@ def harmonic_fill(img, mask, iters=400):
     return relax(out, mask, iters)
 
 
-def prepare():
-    poster = np.array(Image.open(SRC).convert("RGB").resize((W, H), Image.LANCZOS)).astype(np.float32)
-    py = int(round(PANEL_Y * K))
+def prepare(cfg):
+    poster = np.array(Image.open(cfg["src"]).convert("RGB").resize((W, H), Image.LANCZOS)).astype(np.float32)
+    py = int(round(cfg["panel_y"] * K))
     mask = np.zeros((H, W), bool)
-    for b in BOXES.values():
+    for b in cfg["boxes"].values():
         x0, y0, x1, y1 = box(b)
         mask[y0:y1, x0:x1] = True
     mask[py:] = True
     plate = harmonic_fill(poster, mask)
+    plate[py:] = plate[py - 1]         # sous le bandeau : prolonge la dernière ligne du fond
     layers = {}
-    for name, b in BOXES.items():
+    for name, b in cfg["boxes"].items():
         x0, y0, x1, y1 = box(b)
         layers[name] = (x0, y0, poster[y0:y1, x0:x1] - plate[y0:y1, x0:x1])
     panel = poster[py:].copy()
@@ -174,89 +163,185 @@ def shine(frame, b, t0, dur, t, glyph, color, strength):
     reg += band[..., None] * (color - reg)
 
 
-def ring(img, rect, grow, alpha, radius, width):
-    """Contour arrondi mint qui s'étend autour de rect (RGBA dessiné sur img)."""
+def ring(img, rect, grow, alpha, radius, width, color=(94, 234, 190)):
+    """Contour arrondi qui s'étend autour de rect (RGBA dessiné sur img)."""
     if alpha <= 0:
         return
     x0, y0, x1, y1 = (v * K for v in rect)
     ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ImageDraw.Draw(ov).rounded_rectangle(
         (x0 - grow, y0 - grow, x1 + grow, y1 + grow), radius=radius * K + grow,
-        outline=(94, 234, 190, int(255 * alpha)), width=width)
+        outline=(*color, int(255 * alpha)), width=width)
     img.alpha_composite(ov.filter(ImageFilter.GaussianBlur(0.8)))
 
 
-def render(poster, plate, layers, panel, py):
-    # masques pour les reflets
-    x0, y0, x1, y1 = box(BOXES["collage"])
-    glyph_collage = np.clip((poster[y0:y1, x0:x1].mean(-1) - 120) / 90, 0, 1)
-    x0, y0, x1, y1 = box(BOXES["time"])
-    reg = poster[y0:y1, x0:x1]
-    glyph_time = np.clip((reg[..., 1] - reg[..., 0] - 60) / 40, 0, 1)
-    white = np.array([255, 255, 255], np.float32)
+def enter(f, layers, t, name, start, dur=0.45, **kw):
+    """Entrée d'un calque : chaque kw (dx, dy, scale) est une fonction de la progression."""
+    p = prog(t, start, dur)
+    add_layer(f, layers[name], **{k: v(p) for k, v in kw.items()}, alpha=clamp(p * 2.5))
 
+
+def e(p):
+    """Distance restant à parcourir, très nerveux au départ."""
+    return 1 - out_expo(p)
+
+
+def float_bob(t, start):
+    return 3.0 * in_out(prog(t, start, 0.6)) * math.sin(2 * math.pi * (t - start) / 2.6)
+
+
+def glyph_mask(poster, b, fn):
+    x0, y0, x1, y1 = box(b)
+    return np.clip(fn(poster[y0:y1, x0:x1]), 0, 1)
+
+
+def dot_pulse(img, t, center, start=0.7):
+    q = ((t - start) % 1.2) / 0.9 if t > start else 1
+    if q < 1:
+        cx, cy = center[0] * K, center[1] * K
+        r = 5 + 14 * out_cubic(q)
+        ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
+        ImageDraw.Draw(ov).ellipse((cx - r, cy - r, cx + r, cy + r),
+                                   outline=(94, 234, 190, int(200 * (1 - q))), width=2)
+        img.alpha_composite(ov)
+
+
+# --- affiche « Travaux pratiques — Collage » ----------------------------------
+COLLAGE_BOXES = {                  # pixels de l'affiche 1600x2000
+    "logo":    (85, 75, 610, 212),
+    "pill":    (880, 95, 1510, 192),
+    "tp":      (90, 315, 645, 362),
+    "collage": (88, 385, 1030, 667),
+    "part":    (1145, 396, 1508, 434),
+    "gc":      (1102, 438, 1514, 576),
+    "sub":     (90, 680, 1355, 808),
+    "anim":    (90, 832, 580, 952),
+    "time":    (996, 812, 1524, 966),
+    "halo":    (1260, 966, 1524, 995),  # bas du halo du badge horaire, à droite du produit
+    "prod":    (340, 966, 1260, 1515),
+}
+
+
+def collage_setup(poster):
+    return dict(
+        collage=glyph_mask(poster, COLLAGE_BOXES["collage"], lambda r: (r.mean(-1) - 120) / 90),
+        time=glyph_mask(poster, COLLAGE_BOXES["time"], lambda r: (r[..., 1] - r[..., 0] - 60) / 40))
+
+
+def collage_frame(t, f, L, ctx):
+    enter(f, L, t, "logo", 0.10, dx=lambda p: -70 * e(p))
+    enter(f, L, t, "pill", 0.16, dx=lambda p: 70 * e(p))
+    p = prog(t, 0.28, 0.40)
+    add_layer(f, L["tp"], wipe=out_expo(p), alpha=1.0 if p > 0 else 0)
+    p = prog(t, 0.34, 0.55)
+    add_layer(f, L["collage"], dy=150 * K * e(p), clip=True, alpha=1.0 if p > 0 else 0)
+    enter(f, L, t, "part", 0.52, 0.35, dy=lambda p: -16 * e(p))
+    enter(f, L, t, "gc", 0.58, scale=lambda p: 0.88 + 0.12 * out_expo(p))
+    enter(f, L, t, "sub", 0.70, dy=lambda p: 28 * e(p))
+    enter(f, L, t, "anim", 0.84, dx=lambda p: -60 * e(p))
+    enter(f, L, t, "time", 0.92, scale=lambda p: 0.82 + 0.18 * out_back(p, 1.2))
+    enter(f, L, t, "halo", 0.92)
+    p = prog(t, 1.00, 0.60)
+    add_layer(f, L["prod"], dy=90 * e(p) + float_bob(t, 1.6),
+              scale=0.93 + 0.07 * out_expo(p), alpha=clamp(p * 2.2))
+
+
+def collage_shine(t, f, ctx):
+    shine(f, COLLAGE_BOXES["collage"], 2.0, 0.7, t, ctx["collage"], MINT, 0.9)
+    shine(f, COLLAGE_BOXES["time"], 2.45, 0.55, t, ctx["time"], WHITE, 0.55)
+    shine(f, COLLAGE_BOXES["collage"], 4.9, 0.7, t, ctx["collage"], MINT, 0.9)
+
+
+def collage_overlay(t, img, ctx):
+    for t0 in (2.5, 4.4):
+        q = prog(t, t0, 0.8)
+        if 0 < q < 1:
+            ring(img, (1013, 830, 1505, 955), 24 * out_cubic(q), 0.85 * (1 - q), 62, 3)
+    dot_pulse(img, t, (933, 143))
+
+
+# --- affiche « Léa FERRAND — TP Collage » (avec photo) -----------------------
+LEA_BOXES = {                      # pixels de l'affiche 1080x1350
+    "logo":  (5, 38, 402, 188),
+    "pill":  (466, 66, 1020, 154),
+    "name":  (15, 212, 482, 288),
+    "gc":    (36, 356, 367, 446),
+    "card":  (456, 321, 1008, 464),
+    "time":  (552, 478, 902, 555),
+    "photo": (0, 522, 340, 1021),
+    "prod":  (455, 620, 980, 955),
+}
+
+
+def lea_setup(poster):
+    white_text = lambda r: (r.min(-1) - 170) / 60
+    return dict(name=glyph_mask(poster, LEA_BOXES["name"], white_text),
+                time=glyph_mask(poster, LEA_BOXES["time"], white_text))
+
+
+def lea_frame(t, f, L, ctx):
+    enter(f, L, t, "logo", 0.10, dx=lambda p: -70 * e(p))
+    enter(f, L, t, "pill", 0.16, dx=lambda p: 90 * e(p))
+    p = prog(t, 0.28, 0.55)
+    add_layer(f, L["name"], dy=90 * e(p), clip=True, alpha=1.0 if p > 0 else 0)
+    p = prog(t, 0.36, 0.75)
+    add_layer(f, L["photo"], dx=-160 * e(p), scale=1.06 - 0.06 * out_expo(p),
+              alpha=clamp(p * 2.2))
+    enter(f, L, t, "gc", 0.50, scale=lambda p: 0.86 + 0.14 * out_expo(p))
+    enter(f, L, t, "card", 0.58, scale=lambda p: 0.88 + 0.12 * out_expo(p),
+          dy=lambda p: 20 * e(p))
+    enter(f, L, t, "time", 0.76, dy=lambda p: 26 * e(p))
+    p = prog(t, 0.88, 0.60)
+    add_layer(f, L["prod"], dy=90 * e(p) + float_bob(t, 1.5),
+              scale=0.93 + 0.07 * out_expo(p), alpha=clamp(p * 2.2))
+
+
+def lea_shine(t, f, ctx):
+    shine(f, LEA_BOXES["name"], 1.9, 0.7, t, ctx["name"], MINT, 0.9)
+    shine(f, LEA_BOXES["time"], 2.6, 0.55, t, ctx["time"], MINT, 0.8)
+    shine(f, LEA_BOXES["name"], 4.7, 0.7, t, ctx["name"], MINT, 0.9)
+
+
+def lea_overlay(t, img, ctx):
+    for t0 in (2.3, 4.2):
+        q = prog(t, t0, 0.8)
+        if 0 < q < 1:
+            ring(img, (460, 325, 1004, 460), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
+
+
+POSTERS = {
+    "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
+                    src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
+                    setup=collage_setup, frame=collage_frame, shine=collage_shine,
+                    overlay=collage_overlay),
+    "lea": dict(src="assets/post-lea-ferrand.webp", out="video/post-lea-ferrand-anime.mp4",
+                src_w=1080, boxes=LEA_BOXES, panel_y=1022, panel_in=1.15,
+                setup=lea_setup, frame=lea_frame, shine=lea_shine, overlay=lea_overlay),
+}
+
+
+def render(cfg, out, poster, plate, layers, panel, py):
+    ctx = cfg["setup"](poster)
     ff = subprocess.Popen(
         ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
          "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
          "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p",
-         "-movflags", "+faststart", OUT], stdin=subprocess.PIPE)
+         "-movflags", "+faststart", out], stdin=subprocess.PIPE)
 
-    n = int(DUR * FPS)
-    for i in range(n):
+    for i in range(int(DUR * FPS)):
         t = i / FPS
         f = plate.copy()
-
-        def enter(name, start, dur=0.45, **kw):
-            p = prog(t, start, dur)
-            add_layer(f, layers[name], **{k: v(p) for k, v in kw.items()},
-                      alpha=clamp(p * 2.5))
-
-        e = lambda p: 1 - out_expo(p)          # reste à parcourir, très nerveux
-        enter("logo", 0.10, dx=lambda p: -70 * e(p))
-        enter("pill", 0.16, dx=lambda p: 70 * e(p))
-        p = prog(t, 0.28, 0.40)
-        add_layer(f, layers["tp"], wipe=out_expo(p), alpha=1.0 if p > 0 else 0)
-        p = prog(t, 0.34, 0.55)
-        add_layer(f, layers["collage"], dy=150 * K * e(p), clip=True,
-                  alpha=1.0 if p > 0 else 0)
-        enter("part", 0.52, 0.35, dy=lambda p: -16 * e(p))
-        enter("gc", 0.58, scale=lambda p: 0.88 + 0.12 * out_expo(p))
-        enter("sub", 0.70, dy=lambda p: 28 * e(p))
-        enter("anim", 0.84, dx=lambda p: -60 * e(p))
-        enter("time", 0.92, scale=lambda p: 0.82 + 0.18 * out_back(p, 1.2))
-        enter("halo", 0.92)
-        # produit : monte et se pose, puis flotte doucement
-        p = prog(t, 1.00, 0.60)
-        float_amp = 3.0 * in_out(prog(t, 1.6, 0.6))
-        bob = float_amp * math.sin(2 * math.pi * (t - 1.6) / 2.6)
-        add_layer(f, layers["prod"], dy=90 * e(p) + bob,
-                  scale=0.93 + 0.07 * out_expo(p), alpha=clamp(p * 2.2))
+        cfg["frame"](t, f, layers, ctx)
 
         # bandeau d'informations qui monte
-        p = out_expo(prog(t, 1.25, 0.55))
+        p = out_expo(prog(t, cfg["panel_in"], 0.55))
         top = py + int(round((H - py) * (1 - p)))
         if top < H:
             f[top:] = panel[:H - top]
 
-        # reflets
-        shine(f, BOXES["collage"], 2.0, 0.7, t, glyph_collage, MINT, 0.9)
-        shine(f, BOXES["time"], 2.45, 0.55, t, glyph_time, white, 0.55)
-        shine(f, BOXES["collage"], 4.9, 0.7, t, glyph_collage, MINT, 0.9)
-
+        cfg["shine"](t, f, ctx)
         img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
-        # pulsations : badge horaire et point de la pastille
-        for t0 in (2.5, 4.4):
-            q = prog(t, t0, 0.8)
-            if 0 < q < 1:
-                ring(img, TIME_PILL, 24 * out_cubic(q), 0.85 * (1 - q), 62, 3)
-        q = ((t - 0.7) % 1.2) / 0.9 if t > 0.7 else 1
-        if q < 1:
-            dx_, dy_ = DOT[0] * K, DOT[1] * K
-            r = 5 + 14 * out_cubic(q)
-            ov = Image.new("RGBA", img.size, (0, 0, 0, 0))
-            ImageDraw.Draw(ov).ellipse((dx_ - r, dy_ - r, dx_ + r, dy_ + r),
-                                       outline=(94, 234, 190, int(200 * (1 - q))), width=2)
-            img.alpha_composite(ov)
+        cfg["overlay"](t, img, ctx)
 
         # caméra : recul rapide + fondu d'ouverture
         img = img.convert("RGB")
@@ -276,5 +361,10 @@ def render(poster, plate, layers, panel, py):
 
 
 if __name__ == "__main__":
-    render(*prepare())
-    print(OUT)
+    name = sys.argv[1] if len(sys.argv) > 1 else "collage"
+    cfg = POSTERS[name]
+    out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(ROOT, cfg["out"])
+    cfg["src"] = os.path.join(ROOT, cfg["src"])
+    K = W / cfg["src_w"]
+    render(cfg, out, *prepare(cfg))
+    print(out)
