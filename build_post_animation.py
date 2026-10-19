@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
+  - lea-eclat : même affiche, version « choc » (flash, impacts, explosion)
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -245,7 +246,7 @@ COLLAGE_BOXES = {                  # pixels de l'affiche 1600x2000
 }
 
 
-def collage_setup(poster):
+def collage_setup(poster, plate=None):
     return dict(
         collage=glyph_mask(poster, COLLAGE_BOXES["collage"], lambda r: (r.mean(-1) - 120) / 90),
         time=glyph_mask(poster, COLLAGE_BOXES["time"], lambda r: (r[..., 1] - r[..., 0] - 60) / 40))
@@ -296,7 +297,7 @@ LEA_BOXES = {                      # pixels de l'affiche 1080x1350
 }
 
 
-def lea_setup(poster):
+def lea_setup(poster, plate=None):
     white_text = lambda r: (r.min(-1) - 170) / 60
     return dict(name=glyph_mask(poster, LEA_BOXES["name"], white_text),
                 time=glyph_mask(poster, LEA_BOXES["time"], white_text))
@@ -329,6 +330,127 @@ def lea_overlay(t, img, ctx):
         ring(img, (460, 325, 1004, 460), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
 
 
+# --- affiche « Léa FERRAND », version « éclat » --------------------------------
+# Flash blanc, dézoom éclair, éléments qui s'écrasent à leur place (tremblement,
+# onde de choc, aberration chromatique), explosion de particules et rayons
+# lumineux derrière le produit.
+PINK = (232, 40, 92)
+# impacts : (instant, centre x, centre y, intensité)
+ECLAT_IMPACTS = [(0.40, 248, 250, 0.6), (0.70, 732, 392, 1.0), (0.84, 201, 401, 0.5),
+                 (1.15, 717, 787, 1.3), (1.62, 540, 1140, 0.35)]
+PROD_C = (717, 787)
+
+
+def _shock(t, decay):
+    return sum(k * math.exp(-(t - t0) / decay) for t0, _, _, k in ECLAT_IMPACTS if t >= t0)
+
+
+def _particles(seed, n, origin, t0, colors, speed=(300, 950)):
+    rng = np.random.default_rng(seed)
+    return [dict(t0=t0, x=origin[0], y=origin[1], a=rng.uniform(0, 2 * math.pi),
+                 v=rng.uniform(*speed), r=rng.uniform(2.5, 8), life=rng.uniform(0.7, 1.3),
+                 c=colors[rng.integers(len(colors))]) for _ in range(n)]
+
+
+def eclat_setup(poster, plate):
+    ctx = lea_setup(poster)
+    # fond seul (hors éléments) : les rayons ne passent pas sur le texte ni le produit
+    fg = np.clip((np.abs(poster - plate).sum(-1) - 20) / 40, 0, 1)
+    fg = np.array(Image.fromarray((fg * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9))
+                  .filter(ImageFilter.GaussianBlur(4))) / 255.0
+    ctx["bg"] = (1 - fg).astype(np.float32)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    dx, dy = xx - PROD_C[0], yy - PROD_C[1]
+    ctx["theta"] = np.arctan2(dy, dx)
+    ctx["radial"] = np.exp(-(np.hypot(dx, dy) / 520) ** 2)
+    ctx["sparks"] = (_particles(1, 80, PROD_C, 1.15, [(94, 234, 190), (255, 255, 255), PINK]) +
+                     _particles(2, 34, (732, 392), 0.70, [(94, 234, 190), (255, 255, 255)],
+                                (250, 700)))
+    return ctx
+
+
+def eclat_frame(t, f, L, ctx):
+    def slam(name, start, dur, s0, dy=0.0):
+        p = prog(t, start, dur)
+        add_layer(f, L[name], scale=1 + (s0 - 1) * (1 - p) ** 2, dy=dy * (1 - p) ** 2,
+                  alpha=clamp(p * 3))
+
+    enter(f, L, t, "logo", 0.05, 0.4, dx=lambda p: -90 * e(p))
+    enter(f, L, t, "pill", 0.10, 0.4, dx=lambda p: 110 * e(p))
+    slam("name", 0.15, 0.25, 2.4)
+    p = prog(t, 0.30, 0.38)
+    add_layer(f, L["photo"], dx=-380 * e(p), alpha=clamp(p * 3))
+    slam("card", 0.45, 0.25, 2.0)
+    slam("gc", 0.62, 0.22, 1.8)
+    enter(f, L, t, "time", 0.78, 0.35, dy=lambda p: 50 * e(p))
+    p = prog(t, 0.85, 0.30)
+    add_layer(f, L["prod"], scale=1 + 0.7 * (1 - p) ** 2, dy=-80 * (1 - p) ** 2 + float_bob(t, 1.6),
+              alpha=clamp(p * 3))
+
+
+def eclat_background(t, f, ctx):
+    """Rayons lumineux tournants derrière le produit, après l'impact."""
+    if t < 1.15:
+        return
+    k = 0.55 * math.exp(-(t - 1.15) / 0.35) + 0.22 * out_cubic(prog(t, 1.15, 0.4))
+    rays = (0.5 + 0.5 * np.cos(14 * ctx["theta"] + 0.6 * t)) ** 6
+    a = (rays * ctx["radial"] * k * ctx["bg"])[..., None]
+    f += a * (np.array([200, 255, 235], np.float32) - f)
+
+
+def eclat_overlay(t, img, ctx):
+    d = ImageDraw.Draw(img, "RGBA")
+    # ondes de choc
+    for t0, cx, cy, k in ECLAT_IMPACTS[:4]:
+        q = prog(t, t0, 0.45)
+        if 0 < q < 1:
+            r = 30 + 330 * k * out_cubic(q)
+            d.ellipse((cx - r, cy - r, cx + r, cy + r),
+                      outline=(255, 255, 255, int(200 * (1 - q))), width=max(1, int(8 * (1 - q))))
+    # éclair au moment où le produit touche
+    q = prog(t, 1.15, 0.3)
+    if 0 < q < 1:
+        ov = Image.new("RGBA", img.size, (255, 255, 255, int(110 * (1 - q) ** 2)))
+        img.alpha_composite(ov)
+    # particules
+    for s in ctx["sparks"]:
+        dt = t - s["t0"]
+        if not 0 < dt < s["life"]:
+            continue
+        travel = s["v"] * (1 - math.exp(-3 * dt)) / 3
+        x = s["x"] + math.cos(s["a"]) * travel
+        y = s["y"] + math.sin(s["a"]) * travel + 260 * dt * dt
+        fade = 1 - dt / s["life"]
+        r = s["r"] * (0.4 + 0.6 * fade)
+        d.ellipse((x - r, y - r, x + r, y + r), fill=(*s["c"], int(255 * fade)))
+    # pulsation de la carte puis reflets (comme la version précédente)
+    q = prog(t, 2.2, 0.8)
+    if 0 < q < 1:
+        ring(img, (460, 325, 1004, 460), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
+
+
+def eclat_shine(t, f, ctx):
+    shine(f, LEA_BOXES["name"], 1.9, 0.6, t, ctx["name"], MINT, 0.9)
+    shine(f, LEA_BOXES["time"], 2.4, 0.5, t, ctx["time"], MINT, 0.8)
+
+
+def eclat_camera(t):
+    z = 1 + 0.30 * (1 - out_expo(prog(t, 0, 1.0)))       # dézoom éclair
+    a = 16 * _shock(t, 0.10)
+    z = max(z, 1 + 0.035 * min(1, a / 6)) if a > 0.05 else z
+    return z, a * math.sin(t * 97), a * math.cos(t * 71)
+
+
+def eclat_post(t, img, ctx):
+    k = int(round(9 * _shock(t, 0.07)))                   # aberration chromatique
+    if k < 1:
+        return img
+    a = np.asarray(img).copy()
+    a[..., 0] = np.roll(a[..., 0], k, axis=1)
+    a[..., 2] = np.roll(a[..., 2], -k, axis=1)
+    return Image.fromarray(a)
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -338,38 +460,57 @@ POSTERS = {
                 src_w=1080, boxes=LEA_BOXES, panel_y=1022,
                 setup=lea_setup, frame=lea_frame, shine=lea_shine, overlay=lea_overlay,
                 panel_in=1.0, dur=4.5, motion_blur=1.8),
+    "lea-eclat": dict(src="assets/post-lea-ferrand.webp", out="video/post-lea-ferrand-eclat.mp4",
+                      src_w=1080, boxes=LEA_BOXES, panel_y=1022, panel_in=1.2, panel_ease="back",
+                      setup=eclat_setup, frame=eclat_frame, shine=eclat_shine,
+                      overlay=eclat_overlay, background_fx=eclat_background,
+                      camera=eclat_camera, post=eclat_post,
+                      intro_color=(255, 255, 255), intro_dur=0.22, dur=5.0, motion_blur=1.9),
 }
 
 
 def compose(cfg, t, plate, layers, panel, py, ctx):
     f = plate.copy()
     cfg["frame"](t, f, layers, ctx)
+    if "background_fx" in cfg:
+        cfg["background_fx"](t, f, ctx)
 
     # bandeau d'informations qui monte
-    p = out_expo(prog(t, cfg["panel_in"], 0.55))
-    top = py + int(round((H - py) * (1 - p)))
-    if top < H:
+    p = prog(t, cfg["panel_in"], 0.55)
+    p = out_back(p, 1.3) if cfg.get("panel_ease") == "back" else out_expo(p)
+    top = max(py - 40, py + int(round((H - py) * (1 - p))))
+    if top < py:                       # dépassement (rebond) : on étire la 1re ligne
+        f[top:py] = panel[0]
+        f[py:] = panel
+    elif top < H:
         f[top:] = panel[:H - top]
 
     cfg["shine"](t, f, ctx)
     img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
     cfg["overlay"](t, img, ctx)
 
-    # caméra : recul rapide + fondu d'ouverture
+    # caméra : recul rapide (+ tremblement éventuel) + fondu d'ouverture
     img = img.convert("RGB")
-    z = 1 + 0.07 * (1 - out_expo(prog(t, 0, 1.6)))
+    if "camera" in cfg:
+        z, ox, oy = cfg["camera"](t)
+    else:
+        z, ox, oy = 1 + 0.07 * (1 - out_expo(prog(t, 0, 1.6))), 0.0, 0.0
     if z > 1.0001:
         cw, ch = W / z, H / z
-        img = img.resize((W, H), Image.BICUBIC,
-                         box=((W - cw) / 2, (H - ch) * 0.35, (W + cw) / 2, (H - ch) * 0.35 + ch))
-    fade = out_cubic(prog(t, 0, 0.25))
+        bx = clamp((W - cw) / 2 + ox, 0, W - cw)
+        by = clamp((H - ch) * 0.35 + oy, 0, H - ch)
+        img = img.resize((W, H), Image.BICUBIC, box=(bx, by, bx + cw, by + ch))
+    if "post" in cfg:
+        img = cfg["post"](t, img, ctx)
+    fade = out_cubic(prog(t, 0, cfg.get("intro_dur", 0.25)))
     if fade < 1:
-        img = Image.blend(Image.new("RGB", (W, H)), img, fade)
+        start = Image.new("RGB", (W, H), cfg.get("intro_color", (0, 0, 0)))
+        img = Image.blend(start, img, fade)
     return img
 
 
 def render(cfg, out, poster, plate, layers, panel, py):
-    ctx = cfg["setup"](poster)
+    ctx = cfg["setup"](poster, plate)
     ff = subprocess.Popen(
         ["ffmpeg", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
          "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
