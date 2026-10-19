@@ -6,7 +6,8 @@
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
 
-Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s, 6 s.
+Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
+6 s pour « collage », 4,5 s pour « lea ».
 
 L'affiche est découpée en calques : chaque élément (logo, pastille,
 titre, badge GC, horaires, produit, photo...) est extrait par
@@ -19,6 +20,8 @@ blanc d'informations, lui, monte depuis le bas.
 Séquence rythmée : tous les éléments sont en place en moins de 2 s
 (entrées courtes en ease-out exponentiel, sans rebond), puis vie de
 l'image (reflets, pulsations, produit qui flotte doucement).
+Version « lea » : révélations par bandeau (nom, photo, logo GC) et flou
+de mouvement sur toutes les entrées.
 """
 import math
 import os
@@ -181,6 +184,26 @@ def enter(f, layers, t, name, start, dur=0.45, **kw):
     add_layer(f, layers[name], **{k: v(p) for k, v in kw.items()}, alpha=clamp(p * 2.5))
 
 
+def block_reveal(f, L, t, name, start, dur=0.6, color=MINT, **kw):
+    """Un bandeau plein balaie le calque de gauche à droite puis se retire en le dévoilant.
+
+    kw : transformation du calque une fois dévoilé (dx, dy, scale).
+    """
+    p = prog(t, start, dur)
+    if p <= 0:
+        return
+    x0, y0, d = L[name]
+    h, w = d.shape[:2]
+    if p < 0.5:
+        bx0, bx1 = x0, x0 + w * out_expo(p * 2)
+    else:
+        add_layer(f, L[name], **kw)
+        bx0, bx1 = x0 + w * out_expo((p - 0.5) * 2), x0 + w
+    a, b = int(bx0), int(math.ceil(bx1))
+    if b > a:
+        f[y0:y0 + h, a:b] = color
+
+
 def e(p):
     """Distance restant à parcourir, très nerveux au départ."""
     return 1 - out_expo(p)
@@ -280,33 +303,30 @@ def lea_setup(poster):
 
 
 def lea_frame(t, f, L, ctx):
-    enter(f, L, t, "logo", 0.10, dx=lambda p: -70 * e(p))
-    enter(f, L, t, "pill", 0.16, dx=lambda p: 90 * e(p))
-    p = prog(t, 0.28, 0.55)
-    add_layer(f, L["name"], dy=90 * e(p), clip=True, alpha=1.0 if p > 0 else 0)
-    p = prog(t, 0.36, 0.75)
-    add_layer(f, L["photo"], dx=-160 * e(p), scale=1.06 - 0.06 * out_expo(p),
-              alpha=clamp(p * 2.2))
-    enter(f, L, t, "gc", 0.50, scale=lambda p: 0.86 + 0.14 * out_expo(p))
-    enter(f, L, t, "card", 0.58, scale=lambda p: 0.88 + 0.12 * out_expo(p),
-          dy=lambda p: 20 * e(p))
-    enter(f, L, t, "time", 0.76, dy=lambda p: 26 * e(p))
-    p = prog(t, 0.88, 0.60)
-    add_layer(f, L["prod"], dy=90 * e(p) + float_bob(t, 1.5),
-              scale=0.93 + 0.07 * out_expo(p), alpha=clamp(p * 2.2))
+    enter(f, L, t, "logo", 0.08, dx=lambda p: -70 * e(p))
+    enter(f, L, t, "pill", 0.14, dx=lambda p: 90 * e(p))
+    block_reveal(f, L, t, "name", 0.22, 0.55)
+    # photo : dévoilée par le bandeau, puis léger dézoom
+    block_reveal(f, L, t, "photo", 0.32, 0.65,
+                 scale=1.08 - 0.08 * out_cubic(prog(t, 0.645, 1.2)))
+    enter(f, L, t, "card", 0.50, scale=lambda p: 0.9 + 0.1 * out_expo(p),
+          dy=lambda p: 24 * e(p))
+    block_reveal(f, L, t, "gc", 0.56, 0.5, WHITE)
+    enter(f, L, t, "time", 0.70, dy=lambda p: 26 * e(p))
+    p = prog(t, 0.80, 0.60)
+    add_layer(f, L["prod"], dy=110 * e(p) + float_bob(t, 1.4),
+              scale=0.92 + 0.08 * out_expo(p), alpha=clamp(p * 2.2))
 
 
 def lea_shine(t, f, ctx):
-    shine(f, LEA_BOXES["name"], 1.9, 0.7, t, ctx["name"], MINT, 0.9)
-    shine(f, LEA_BOXES["time"], 2.6, 0.55, t, ctx["time"], MINT, 0.8)
-    shine(f, LEA_BOXES["name"], 4.7, 0.7, t, ctx["name"], MINT, 0.9)
+    shine(f, LEA_BOXES["name"], 1.55, 0.6, t, ctx["name"], MINT, 0.9)
+    shine(f, LEA_BOXES["time"], 2.05, 0.5, t, ctx["time"], MINT, 0.8)
 
 
 def lea_overlay(t, img, ctx):
-    for t0 in (2.3, 4.2):
-        q = prog(t, t0, 0.8)
-        if 0 < q < 1:
-            ring(img, (460, 325, 1004, 460), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
+    q = prog(t, 1.8, 0.8)
+    if 0 < q < 1:
+        ring(img, (460, 325, 1004, 460), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
 
 
 POSTERS = {
@@ -315,9 +335,37 @@ POSTERS = {
                     setup=collage_setup, frame=collage_frame, shine=collage_shine,
                     overlay=collage_overlay),
     "lea": dict(src="assets/post-lea-ferrand.webp", out="video/post-lea-ferrand-anime.mp4",
-                src_w=1080, boxes=LEA_BOXES, panel_y=1022, panel_in=1.15,
-                setup=lea_setup, frame=lea_frame, shine=lea_shine, overlay=lea_overlay),
+                src_w=1080, boxes=LEA_BOXES, panel_y=1022,
+                setup=lea_setup, frame=lea_frame, shine=lea_shine, overlay=lea_overlay,
+                panel_in=1.0, dur=4.5, motion_blur=1.8),
 }
+
+
+def compose(cfg, t, plate, layers, panel, py, ctx):
+    f = plate.copy()
+    cfg["frame"](t, f, layers, ctx)
+
+    # bandeau d'informations qui monte
+    p = out_expo(prog(t, cfg["panel_in"], 0.55))
+    top = py + int(round((H - py) * (1 - p)))
+    if top < H:
+        f[top:] = panel[:H - top]
+
+    cfg["shine"](t, f, ctx)
+    img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
+    cfg["overlay"](t, img, ctx)
+
+    # caméra : recul rapide + fondu d'ouverture
+    img = img.convert("RGB")
+    z = 1 + 0.07 * (1 - out_expo(prog(t, 0, 1.6)))
+    if z > 1.0001:
+        cw, ch = W / z, H / z
+        img = img.resize((W, H), Image.BICUBIC,
+                         box=((W - cw) / 2, (H - ch) * 0.35, (W + cw) / 2, (H - ch) * 0.35 + ch))
+    fade = out_cubic(prog(t, 0, 0.25))
+    if fade < 1:
+        img = Image.blend(Image.new("RGB", (W, H)), img, fade)
+    return img
 
 
 def render(cfg, out, poster, plate, layers, panel, py):
@@ -328,31 +376,16 @@ def render(cfg, out, poster, plate, layers, panel, py):
          "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p",
          "-movflags", "+faststart", out], stdin=subprocess.PIPE)
 
-    for i in range(int(DUR * FPS)):
+    blur = cfg.get("motion_blur", 0)   # flou de mouvement jusqu'à cet instant (s)
+    for i in range(int(cfg.get("dur", DUR) * FPS)):
         t = i / FPS
-        f = plate.copy()
-        cfg["frame"](t, f, layers, ctx)
-
-        # bandeau d'informations qui monte
-        p = out_expo(prog(t, cfg["panel_in"], 0.55))
-        top = py + int(round((H - py) * (1 - p)))
-        if top < H:
-            f[top:] = panel[:H - top]
-
-        cfg["shine"](t, f, ctx)
-        img = Image.fromarray(np.clip(f, 0, 255).astype(np.uint8)).convert("RGBA")
-        cfg["overlay"](t, img, ctx)
-
-        # caméra : recul rapide + fondu d'ouverture
-        img = img.convert("RGB")
-        z = 1 + 0.07 * (1 - out_expo(prog(t, 0, 1.6)))
-        if z > 1.0001:
-            cw, ch = W / z, H / z
-            img = img.resize((W, H), Image.BICUBIC,
-                             box=((W - cw) / 2, (H - ch) * 0.35, (W + cw) / 2, (H - ch) * 0.35 + ch))
-        fade = out_cubic(prog(t, 0, 0.25))
-        if fade < 1:
-            img = Image.blend(Image.new("RGB", (W, H)), img, fade)
+        if t < blur:
+            # obturateur à 180° : moyenne de 4 instants sur la demi-image
+            acc = sum(np.asarray(compose(cfg, t + k / (8 * FPS), plate, layers, panel, py, ctx),
+                                 np.float32) for k in range(4))
+            img = Image.fromarray((acc / 4 + 0.5).astype(np.uint8))
+        else:
+            img = compose(cfg, t, plate, layers, panel, py, ctx)
         ff.stdin.write(img.tobytes())
 
     ff.stdin.close()
