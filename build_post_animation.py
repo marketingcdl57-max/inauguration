@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres|segala-naturel] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
@@ -11,6 +11,7 @@
   - segala-pro : même affiche, version sobre et nette (ligne d'accent, ouvertures)
   - segala-eclat : même affiche, version percutante sans flou (impacts, explosion)
   - segala-titres : même affiche, intro typographique puis ouverture en cercle
+  - segala-naturel : même affiche, profondeur (parallaxe) et mouvements souples
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -873,6 +874,72 @@ def titles_post(t, img, ctx):
     return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
 
 
+# --- même affiche, version « naturelle » : profondeur et mouvements souples ----
+# La caméra glisse lentement et revient au centre ; chaque élément bouge selon
+# sa profondeur (parallaxe), apparaît en douceur avec un ressort à peine
+# perceptible, et une lumière douce se déplace dans le fond.
+DEPTH = {"logo": 0.6, "pill": 0.6, "name": 1.0, "role": 1.0, "nsk": 1.2,
+         "card": 1.4, "time": 1.3, "device": 2.0}
+NAT_ENTRIES = [("logo", 0.20), ("pill", 0.30), ("name", 0.45), ("role", 0.60), ("nsk", 0.70),
+               ("card", 0.80), ("time", 0.95), ("device", 1.00)]
+
+
+def spring(p):
+    return 1 - math.exp(-5 * p) * math.cos(9 * p)
+
+
+def nat_cam(t):
+    k = 1 - in_out(prog(t, 0, 3.6))
+    return -14 * k, -10 * k          # décalage léger : les éléments partent vers la droite
+
+
+def nat_setup(poster, plate):
+    ctx = segala_setup(poster, plate)
+    ctx["plate_pad"] = np.pad(plate, ((24, 24), (24, 24), (0, 0)), mode="edge")
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    ctx["xx"], ctx["yy"] = xx, yy
+    return ctx
+
+
+def nat_plate(t, plate, ctx):
+    cx, cy = nat_cam(t)
+    ox, oy = 24 - 0.3 * cx, 24 - 0.3 * cy          # le fond bouge peu (lointain)
+    if abs(ox - 24) < 1e-3 and abs(oy - 24) < 1e-3:
+        return plate.copy()
+    pad = ctx["plate_pad"]
+    return np.stack([np.array(Image.fromarray(pad[..., c]).transform(
+        (W, H), Image.AFFINE, (1, 0, ox, 0, 1, oy), Image.BILINEAR)) for c in range(3)], -1)
+
+
+def nat_frame(t, f, L, ctx):
+    cx, cy = nat_cam(t)
+    for name, start in NAT_ENTRIES:
+        p = prog(t, start, 0.9)
+        if p <= 0:
+            continue
+        d = DEPTH[name]
+        rise = (50 if name == "device" else 30) * (1 - spring(p))
+        bob = float_bob(t, 2.0) if name == "device" else 0.0
+        add_layer(f, L[name], dx=-d * cx, dy=-d * cy + rise + bob, alpha=clamp(p * 1.8))
+
+
+def nat_background(t, f, ctx):
+    segala_background(t, f, ctx)
+    # lumière douce qui dérive lentement en haut à droite
+    k = 0.10 * out_cubic(prog(t, 0.3, 1.2))
+    lx, ly = 760 + 140 * math.sin(t * 0.7), 260 + 60 * math.cos(t * 0.5)
+    g = np.exp(-(((ctx["xx"] - lx) / 380) ** 2 + ((ctx["yy"] - ly) / 300) ** 2)) * k * ctx["bg"]
+    f += g[..., None] * (np.array([185, 210, 255], np.float32) - f)
+
+
+def nat_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 2.6, 0.9, t, ctx["name"], ICE, 0.7)
+
+
+def nat_camera(t):
+    return 1 + 0.02 * (1 - in_out(prog(t, 0, 3.6))), 0.0, 0.0
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -916,17 +983,24 @@ POSTERS = {
                           setup=titles_setup, frame=titles_frame, shine=titles_shine,
                           overlay=titles_overlay, camera=titles_camera, post=titles_post,
                           intro_dur=0.001, dur=4.8),
+    "segala-naturel": dict(src="assets/post-charlotte-segala.png",
+                           out="video/post-charlotte-segala-naturel.mp4",
+                           src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.3,
+                           panel_dur=0.9, setup=nat_setup, plate_fx=nat_plate, frame=nat_frame,
+                           shine=nat_shine, overlay=lambda t, img, ctx: None,
+                           background_fx=nat_background, camera=nat_camera,
+                           intro_color=NAVY, intro_dur=0.5, dur=5.0),
 }
 
 
 def compose(cfg, t, plate, layers, panel, py, ctx):
-    f = plate.copy()
+    f = cfg["plate_fx"](t, plate, ctx) if "plate_fx" in cfg else plate.copy()
     cfg["frame"](t, f, layers, ctx)
     if "background_fx" in cfg:
         cfg["background_fx"](t, f, ctx)
 
     # bandeau d'informations qui monte
-    p = prog(t, cfg["panel_in"], 0.55)
+    p = prog(t, cfg["panel_in"], cfg.get("panel_dur", 0.55))
     p = out_back(p, 1.3) if cfg.get("panel_ease") == "back" else out_expo(p)
     top = max(py - 40, py + int(round((H - py) * (1 - p))))
     if top < py:                       # dépassement (rebond) : on étire la 1re ligne
