@@ -3,7 +3,7 @@
 
 Format vertical 1080x1920 (Reels / Stories / TikTok), 30 i/s, sans texte
 sur les photos. Chaque photo n'apparaît qu'une seule fois :
-couloir (travelling avant) -> salles de soins -> salle d'attente, qui se
+couloir (travelling avant fluide) -> salles de soins -> salle d'attente, qui se
 floute progressivement pour laisser place à la signature
 « Installation réalisée par » + logo Comptoir Dentaire Lorrain.
 
@@ -33,10 +33,10 @@ ZOOM_XF = 0.5    # fondu court pendant un zoom-through
 PAN_XF = 1.0     # fondu long pendant un match-pan
 
 SHOTS = [
-    # Marche dans le couloir : zoom qui accélère (perspective), léger
-    # balancement de pas, flou de mouvement.
-    dict(img="couloir.jpg", dur=5.6, off=0.5, scale=3, bob=True, blur=True,
-         zoom="1/(1-0.58*{p})", fx="0.5+0.12*{p}", fy="0.5-0.07*{p}", xf=0.45),
+    # Couloir : travelling avant fluide (type rail), puis poussée vers la
+    # porte qui enchaîne sur la salle de soins.
+    dict(img="couloir.jpg", dur=4.0, off=0.5, scale=3, blur=True,
+         zoom="1+0.18*{p}+1.0*pow(max(0,({p}-0.6)/0.4),3)", fx="0.5+0.12*{p}", fy="0.5-0.07*{p}", xf=0.45),
     # On entre dans la salle de soins, puis panoramique lent vers la droite.
     dict(img="soins-2.jpg", dur=4.6, off=0.42,
          zoom="1.14+" + ARRIVE, fx="0.45+0.10*{p}", fy="0.52", xf=PAN_XF),
@@ -66,8 +66,6 @@ def camera(s):
     zoom, fx, fy = (s[k].format(p=p) for k in ("zoom", "fx", "fy"))
     k = s.get("scale", 2)
     y = f"ih*({fy})-ih/zoom/2"
-    if s.get("bob"):
-        y += f"+ih*0.0025*sin(2*PI*1.8*on/{FPS})"   # balancement de pas (~1,8 pas/s)
     f = (f"scale=-2:{H * k},crop={W * k}:{H * k}:(iw-ow)*{s['off']}:0,"
          f"zoompan=z='{zoom}':x='iw*({fx})-iw/zoom/2':y='{y}':d={n}:s={W}x{H}:fps={FPS},"
          "eq=contrast=1.04:saturation=1.06:brightness=0.01")
