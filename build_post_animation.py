@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
   - lea-eclat : même affiche, version « choc » (flash, impacts, explosion)
   - segala  : « Charlotte SEGALA — Conférence NSK VCP2 », style épuré
   - segala-pop : même affiche, version plus vivante (vague, rebonds, lumières)
+  - segala-pro : même affiche, version sobre et nette (ligne d'accent, ouvertures)
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -116,17 +117,19 @@ def prepare(cfg):
 
 
 # --- composition ---------------------------------------------------------------
-def add_layer(frame, layer, dx=0.0, dy=0.0, scale=1.0, alpha=1.0, clip=False, wipe=None):
+def add_layer(frame, layer, dx=0.0, dy=0.0, scale=1.0, alpha=1.0, clip=False, wipe=None,
+              open_=None):
     """Ajoute un calque (différence) transformé autour de son centre.
 
     clip : limite le calque à sa zone d'origine (révélation par masque).
     wipe : fraction 0..1 révélée de gauche à droite.
+    open_ : fraction 0..1 révélée depuis le centre vers les côtés.
     """
     if alpha <= 0:
         return
     x0, y0, d = layer
     h, w = d.shape[:2]
-    if dx == dy == 0 and scale == 1 and wipe is None:
+    if dx == dy == 0 and scale == 1 and wipe is None and open_ is None:
         frame[y0:y0 + h, x0:x0 + w] += alpha * d
         return
     m = 40 if not clip else 0
@@ -151,6 +154,10 @@ def add_layer(frame, layer, dx=0.0, dy=0.0, scale=1.0, alpha=1.0, clip=False, wi
         xs = np.arange(size[0]) + ox
         edge = wipe * (w + 60) - 30
         out *= np.clip((edge - xs) / 30 + 0.5, 0, 1)[None, :, None]
+    if open_ is not None:
+        xs = np.arange(size[0]) + ox
+        half = open_ * (w / 2 + 20)
+        out *= np.clip((half - np.abs(xs - w / 2)) / 20 + 0.5, 0, 1)[None, :, None]
     frame[gy0:gy1, gx0:gx1] += alpha * out
 
 
@@ -627,6 +634,43 @@ def pop_post(t, img, ctx):
     return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
 
 
+# --- même affiche, version « pro » : sobre, nette, sans effets décoratifs ------
+ACCENT = np.array([120, 175, 255], np.float32)
+
+
+def pro_frame(t, f, L, ctx):
+    enter(f, L, t, "logo", 0.10, 0.60, dx=lambda p: -40 * e(p))
+    p = prog(t, 0.15, 0.55)
+    add_layer(f, L["pill"], open_=out_expo(p), alpha=1.0 if p > 0 else 0)
+    # ligne d'accent qui se trace sous le nom, le nom sort de derrière, puis elle repart
+    x0, x1, y = 30, 632, 281
+    p, q = out_expo(prog(t, 0.28, 0.45)), out_expo(prog(t, 0.95, 0.45))
+    if 0 < p and q < 1:
+        a, b = int(x0 + (x1 - x0) * q), int(x0 + (x1 - x0) * p)
+        if b > a:
+            f[y:y + 3, a:b] = ACCENT
+    p = prog(t, 0.40, 0.60)
+    add_layer(f, L["name"], dy=75 * e(p), clip=True, alpha=1.0 if p > 0 else 0)
+    enter(f, L, t, "role", 0.60, 0.50, dy=lambda p: 16 * e(p))
+    p = prog(t, 0.62, 0.55)
+    add_layer(f, L["nsk"], open_=out_expo(p), alpha=1.0 if p > 0 else 0)
+    p = prog(t, 0.72, 0.60)
+    add_layer(f, L["card"], open_=out_expo(p), dy=12 * e(p), alpha=1.0 if p > 0 else 0)
+    enter(f, L, t, "time", 0.95, 0.50, dx=lambda p: 40 * e(p))
+    p = prog(t, 1.00, 0.80)
+    add_layer(f, L["device"], dy=60 * e(p), scale=0.96 + 0.04 * out_expo(p), alpha=clamp(p * 2))
+
+
+def pro_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 2.1, 0.8, t, ctx["name"], ICE, 0.8)
+
+
+def pro_camera(t):
+    # apparition avec léger recul, puis lente avancée qui se pose
+    z = 1 + 0.04 * (1 - out_expo(prog(t, 0, 1.4))) + 0.02 * in_out(prog(t, 1.4, 2.6))
+    return z, 0.0, 0.0
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -652,6 +696,11 @@ POSTERS = {
                        setup=pop_setup, frame=pop_frame, shine=pop_shine, overlay=pop_overlay,
                        background_fx=pop_background, post=pop_post,
                        intro_dur=0.001, dur=5.0),
+    "segala-pro": dict(src="assets/post-charlotte-segala.png", out="video/post-charlotte-segala-pro.mp4",
+                       src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.3,
+                       setup=segala_setup, frame=pro_frame, shine=pro_shine,
+                       overlay=lambda t, img, ctx: None, camera=pro_camera,
+                       intro_color=NAVY, intro_dur=0.35, dur=4.5),
 }
 
 
