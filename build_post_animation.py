@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
   - lea-eclat : même affiche, version « choc » (flash, impacts, explosion)
+  - segala  : « Charlotte SEGALA — Conférence NSK VCP2 », style épuré
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -103,7 +104,7 @@ def prepare(cfg):
         mask[y0:y1, x0:x1] = True
     mask[py:] = True
     plate = harmonic_fill(poster, mask)
-    plate[py:] = plate[py - 1]         # sous le bandeau : prolonge la dernière ligne du fond
+    plate[py:] = plate[py - 6]         # sous le bandeau : prolonge le fond (hors liseré de transition)
     layers = {}
     for name, b in cfg["boxes"].items():
         x0, y0, x1, y1 = box(b)
@@ -352,13 +353,17 @@ def _particles(seed, n, origin, t0, colors, speed=(300, 950)):
                  c=colors[rng.integers(len(colors))]) for _ in range(n)]
 
 
-def eclat_setup(poster, plate):
-    ctx = lea_setup(poster)
-    # fond seul (hors éléments) : les rayons ne passent pas sur le texte ni le produit
+def bg_mask(poster, plate):
+    """1 sur le fond seul, 0 sur les éléments : les effets de lumière passent derrière."""
     fg = np.clip((np.abs(poster - plate).sum(-1) - 20) / 40, 0, 1)
     fg = np.array(Image.fromarray((fg * 255).astype(np.uint8)).filter(ImageFilter.MaxFilter(9))
                   .filter(ImageFilter.GaussianBlur(4))) / 255.0
-    ctx["bg"] = (1 - fg).astype(np.float32)
+    return (1 - fg).astype(np.float32)
+
+
+def eclat_setup(poster, plate):
+    ctx = lea_setup(poster)
+    ctx["bg"] = bg_mask(poster, plate)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
     dx, dy = xx - PROD_C[0], yy - PROD_C[1]
     ctx["theta"] = np.arctan2(dy, dx)
@@ -451,6 +456,68 @@ def eclat_post(t, img, ctx):
     return Image.fromarray(a)
 
 
+# --- affiche « Charlotte SEGALA — Conférence NSK VCP2 » ------------------------
+# Style épuré : révélations par masque et rideau, halo doux derrière l'appareil.
+SEGALA_BOXES = {                   # pixels de l'affiche 1080x1350
+    "logo":   (20, 30, 418, 182),
+    "pill":   (484, 58, 1036, 146),
+    "name":   (30, 205, 632, 280),
+    "role":   (30, 286, 284, 340),
+    "nsk":    (30, 354, 305, 487),
+    "card":   (470, 328, 1024, 524),
+    "time":   (568, 530, 918, 606),
+    "device": (100, 615, 505, 958),
+}
+ICE = np.array([170, 205, 255], np.float32)
+NAVY = (12, 28, 78)
+DEVICE_C = (300, 790)
+
+
+def segala_setup(poster, plate):
+    ctx = dict(name=glyph_mask(poster, SEGALA_BOXES["name"], lambda r: (r.min(-1) - 170) / 60),
+               card=glyph_mask(poster, SEGALA_BOXES["card"], lambda r: (140 - r.mean(-1)) / 60),
+               bg=bg_mask(poster, plate))
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    ctx["halo"] = np.exp(-((xx - DEVICE_C[0]) ** 2 + ((yy - DEVICE_C[1]) * 1.3) ** 2) / 300 ** 2)
+    return ctx
+
+
+def segala_frame(t, f, L, ctx):
+    enter(f, L, t, "logo", 0.10, 0.55, dx=lambda p: -50 * e(p))
+    enter(f, L, t, "pill", 0.18, 0.55, dx=lambda p: 60 * e(p))
+    p = prog(t, 0.30, 0.60)
+    add_layer(f, L["name"], dy=85 * e(p), clip=True, alpha=1.0 if p > 0 else 0)
+    p = prog(t, 0.52, 0.50)
+    add_layer(f, L["role"], wipe=out_expo(p), alpha=1.0 if p > 0 else 0)
+    block_reveal(f, L, t, "nsk", 0.55, 0.60, WHITE)
+    p = prog(t, 0.62, 0.60)
+    add_layer(f, L["card"], wipe=out_expo(p), dy=14 * e(p), alpha=1.0 if p > 0 else 0)
+    enter(f, L, t, "time", 0.88, 0.50, dy=lambda p: 24 * e(p))
+    p = prog(t, 0.90, 0.75)
+    add_layer(f, L["device"], dy=70 * e(p) + float_bob(t, 1.7),
+              scale=0.95 + 0.05 * out_expo(p), alpha=clamp(p * 2))
+
+
+def segala_background(t, f, ctx):
+    """Halo de lumière douce qui s'allume derrière l'appareil."""
+    k = 0.16 * out_cubic(prog(t, 1.1, 0.9)) * (1 + 0.15 * math.sin(2 * math.pi * (t - 2) / 2.6))
+    if k > 0:
+        a = (ctx["halo"] * ctx["bg"] * k)[..., None]
+        f += a * (np.array([190, 215, 255], np.float32) - f)
+
+
+def segala_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 1.85, 0.7, t, ctx["name"], ICE, 0.85)
+    shine(f, SEGALA_BOXES["card"], 2.45, 0.8, t, ctx["card"], np.array([60, 110, 220], np.float32), 0.7)
+    shine(f, SEGALA_BOXES["name"], 4.0, 0.7, t, ctx["name"], ICE, 0.85)
+
+
+def segala_overlay(t, img, ctx):
+    q = prog(t, 3.1, 0.9)
+    if 0 < q < 1:
+        ring(img, (476, 333, 1019, 518), 20 * out_cubic(q), 0.7 * (1 - q), 22, 2, (255, 255, 255))
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -466,6 +533,11 @@ POSTERS = {
                       overlay=eclat_overlay, background_fx=eclat_background,
                       camera=eclat_camera, post=eclat_post,
                       intro_color=(255, 255, 255), intro_dur=0.22, dur=5.0, motion_blur=1.9),
+    "segala": dict(src="assets/post-charlotte-segala.png", out="video/post-charlotte-segala-anime.mp4",
+                   src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.2,
+                   setup=segala_setup, frame=segala_frame, shine=segala_shine,
+                   overlay=segala_overlay, background_fx=segala_background,
+                   intro_color=NAVY, intro_dur=0.35, dur=5.0, motion_blur=1.9),
 }
 
 
