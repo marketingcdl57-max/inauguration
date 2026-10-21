@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
   - lea-eclat : même affiche, version « choc » (flash, impacts, explosion)
   - segala  : « Charlotte SEGALA — Conférence NSK VCP2 », style épuré
+  - segala-pop : même affiche, version plus vivante (vague, rebonds, lumières)
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -466,7 +467,7 @@ SEGALA_BOXES = {                   # pixels de l'affiche 1080x1350
     "nsk":    (30, 354, 305, 487),
     "card":   (470, 328, 1024, 524),
     "time":   (568, 530, 918, 606),
-    "device": (100, 615, 505, 958),
+    "device": (100, 615, 505, 1003),   # jusqu'au bandeau : inclut l'ombre portée
 }
 ICE = np.array([170, 205, 255], np.float32)
 NAVY = (12, 28, 78)
@@ -518,6 +519,113 @@ def segala_overlay(t, img, ctx):
         ring(img, (476, 333, 1019, 518), 20 * out_cubic(q), 0.7 * (1 - q), 22, 2, (255, 255, 255))
 
 
+# --- même affiche, version « pop » : plus vivante et attirante -----------------
+# Ouverture par balayage lumineux en diagonale, nom qui apparaît en vague,
+# entrées avec petit rebond, bulles de lumière, étincelles sur l'appareil.
+SPARKLES = [(1.75, 292, 640), (1.95, 462, 650), (2.15, 185, 700), (2.30, 420, 810),
+            (2.50, 330, 760), (3.60, 320, 655), (3.80, 150, 860), (4.00, 470, 700),
+            (4.20, 250, 720)]
+
+
+def slices(layer, width):
+    x0, y0, d = layer
+    return [(x0 + i, y0, d[:, i:i + width]) for i in range(0, d.shape[1], width)]
+
+
+def pop_setup(poster, plate):
+    ctx = segala_setup(poster, plate)
+    rng = np.random.default_rng(7)
+    ctx["bokeh"] = [dict(x=rng.uniform(0, W), y=rng.uniform(150, 1000), r=rng.uniform(18, 55),
+                         v=rng.uniform(15, 45), a=rng.uniform(0.10, 0.22), ph=rng.uniform(0, 6.3))
+                    for _ in range(16)]
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    ctx["diag"] = xx + 0.6 * yy
+    return ctx
+
+
+def pop_frame(t, f, L, ctx):
+    enter(f, L, t, "logo", 0.15, 0.5, dx=lambda p: -60 * e(p))
+    enter(f, L, t, "pill", 0.20, 0.5, dx=lambda p: 70 * e(p))
+    # nom puis fonction : vague de gauche à droite, tranche par tranche
+    for name, start, step, rise in (("name", 0.30, 0.020, 80), ("role", 0.62, 0.025, 50)):
+        for i, sl in enumerate(slices(L[name], 30)):
+            p = prog(t, start + i * step, 0.40)
+            if p > 0:
+                add_layer(f, sl, dy=rise * e(p), clip=True)
+    p = prog(t, 0.60, 0.50)
+    add_layer(f, L["nsk"], scale=0.5 + 0.5 * out_back(p, 1.7), alpha=clamp(p * 3))
+    p = prog(t, 0.72, 0.55)
+    add_layer(f, L["card"], scale=0.7 + 0.3 * out_back(p, 1.4), dy=30 * e(p), alpha=clamp(p * 3))
+    enter(f, L, t, "time", 0.98, 0.45, dx=lambda p: 70 * e(p))
+    p = prog(t, 1.00, 0.70)
+    add_layer(f, L["device"], dy=120 * (1 - out_back(p, 1.3)) + float_bob(t, 1.8),
+              scale=0.9 + 0.1 * out_expo(p), alpha=clamp(p * 2.5))
+
+
+def pop_background(t, f, ctx):
+    segala_background(t, f, ctx)
+    # bulles de lumière qui montent doucement (derrière les éléments)
+    k_in = out_cubic(prog(t, 0.3, 1.0))
+    for b in ctx["bokeh"]:
+        y = (b["y"] - b["v"] * t) % 1000 + 50
+        x = b["x"] + 12 * math.sin(t * 1.3 + b["ph"])
+        r = b["r"]
+        x0, x1 = int(max(0, x - 2 * r)), int(min(W, x + 2 * r))
+        y0, y1 = int(max(0, y - 2 * r)), int(min(H, y + 2 * r))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        g = np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / r ** 2) * b["a"] * k_in
+        g = (g * ctx["bg"][y0:y1, x0:x1])[..., None]
+        f[y0:y1, x0:x1] += g * (np.array([200, 225, 255], np.float32) - f[y0:y1, x0:x1])
+    # traînée de lumière diagonale qui traverse l'affiche
+    q = prog(t, 1.85, 0.9)
+    if 0 < q < 1:
+        c = -300 + in_out(q) * (W + 0.6 * H + 600)
+        band = np.exp(-((ctx["diag"] - c) / 70) ** 2) * 0.22 * ctx["bg"]
+        f += band[..., None] * (WHITE - f)
+
+
+def pop_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 2.6, 0.7, t, ctx["name"], ICE, 0.85)
+    shine(f, SEGALA_BOXES["card"], 3.1, 0.8, t, ctx["card"], np.array([60, 110, 220], np.float32), 0.7)
+
+
+def sparkle(d, x, y, size, alpha):
+    w = size * 0.18
+    pts = [(x, y - size), (x + w, y - w), (x + size, y), (x + w, y + w),
+           (x, y + size), (x - w, y + w), (x - size, y), (x - w, y - w)]
+    d.polygon(pts, fill=(255, 255, 255, alpha))
+    g = size * 0.35
+    d.ellipse((x - g, y - g, x + g, y + g), fill=(200, 225, 255, alpha // 3))
+
+
+def pop_overlay(t, img, ctx):
+    d = ImageDraw.Draw(img, "RGBA")
+    for t0, x, y in SPARKLES:
+        q = prog(t, t0, 0.55)
+        if 0 < q < 1:
+            sparkle(d, x, y, 42 * math.sin(math.pi * q), int(255 * math.sin(math.pi * q)))
+    q = prog(t, 3.3, 0.9)
+    if 0 < q < 1:
+        ring(img, (476, 333, 1019, 518), 20 * out_cubic(q), 0.7 * (1 - q), 22, 2, (255, 255, 255))
+
+
+def pop_post(t, img, ctx):
+    """Ouverture : balayage diagonal avec une lisière lumineuse."""
+    q = prog(t, 0.0, 0.6)
+    if q >= 1:
+        return img
+    c = -150 + out_cubic(q) * (W + 0.6 * H + 300)
+    diag = ctx["diag"]
+    m = np.clip((c - diag) / 40, 0, 1)[..., None]
+    a = np.asarray(img, np.float32)
+    out = np.array(NAVY, np.float32) * (1 - m) + a * m
+    edge = np.exp(-((diag - c) / 22) ** 2)[..., None]
+    out += edge * (np.array([215, 235, 255], np.float32) - out) * 0.9
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -538,6 +646,11 @@ POSTERS = {
                    setup=segala_setup, frame=segala_frame, shine=segala_shine,
                    overlay=segala_overlay, background_fx=segala_background,
                    intro_color=NAVY, intro_dur=0.35, dur=5.0, motion_blur=1.9),
+    "segala-pop": dict(src="assets/post-charlotte-segala.png", out="video/post-charlotte-segala-pop.mp4",
+                       src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.3, panel_ease="back",
+                       setup=pop_setup, frame=pop_frame, shine=pop_shine, overlay=pop_overlay,
+                       background_fx=pop_background, post=pop_post,
+                       intro_dur=0.001, dur=5.0, motion_blur=2.0),
 }
 
 
