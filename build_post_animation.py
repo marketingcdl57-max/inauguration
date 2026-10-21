@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
@@ -10,6 +10,7 @@
   - segala-pop : même affiche, version plus vivante (vague, rebonds, lumières)
   - segala-pro : même affiche, version sobre et nette (ligne d'accent, ouvertures)
   - segala-eclat : même affiche, version percutante sans flou (impacts, explosion)
+  - segala-titres : même affiche, intro typographique puis ouverture en cercle
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -34,7 +35,7 @@ import subprocess
 import sys
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 W, H, FPS, DUR = 1080, 1350, 60, 6.0
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -757,6 +758,121 @@ def sg_eclat_camera(t):
     return z, a * math.sin(t * 97), a * math.cos(t * 71)
 
 
+# --- même affiche, version « titres » : intro typographique puis ouverture -----
+# Trois écrans de titres plein cadre qui se poussent l'un l'autre, puis un
+# cercle s'ouvre au centre et dévoile l'affiche, qui finit de se mettre en place.
+FONT_DIR = "/usr/share/fonts/opentype/inter"
+TITLES = [  # (début, fond, couleur titre, titre, sous-titre, couleur sous-titre)
+    (0.00, NAVY, (255, 255, 255), "CONFÉRENCE", "Charlotte SEGALA", (150, 190, 255)),
+    (0.42, (255, 255, 255), (16, 36, 104), "DEEP CLEANING", "avec le VCP2 · NSK", (50, 100, 215)),
+    (0.84, (40, 95, 215), (255, 255, 255), "15H – 15H30", "29 OCTOBRE", (205, 222, 255)),
+]
+IRIS_AT = 1.25
+
+
+def text_layer(text, font_file, max_w, max_size, color, track=0.04):
+    """Texte espacé sur calque RGBA transparent, à la taille qui tient dans max_w."""
+    size = max_size
+    while True:
+        font = ImageFont.truetype(os.path.join(FONT_DIR, font_file), size)
+        widths = [font.getlength(c) for c in text]
+        total = sum(widths) + track * size * (len(text) - 1)
+        if total <= max_w or size <= 20:
+            break
+        size -= 4
+    asc, desc = font.getmetrics()
+    img = Image.new("RGBA", (int(total) + 4, asc + desc + 4), (0, 0, 0, 0))
+    d, x = ImageDraw.Draw(img), 2
+    for c, w in zip(text, widths):
+        d.text((x, 2), c, font=font, fill=color)
+        x += w + track * size
+    return img
+
+
+def titles_setup(poster, plate):
+    ctx = segala_setup(poster, plate)
+    ctx["titles"] = [(t0, bg, text_layer(word, "InterDisplay-Black.otf", 900, 190, fg, 0.03),
+                      text_layer(cap, "InterDisplay-SemiBold.otf", 800, 64, cc, 0.06), fg)
+                     for t0, bg, fg, word, cap, cc in TITLES]
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    ctx["dist"] = np.hypot(xx - W / 2, yy - H / 2)
+    return ctx
+
+
+def title_scene(t, scene):
+    t0, bg, word, cap, fg = scene
+    img = Image.new("RGB", (W, H), bg)
+    k = 1.10 - 0.10 * out_expo(prog(t, t0, 0.5))          # le titre se pose en se resserrant
+    w = word.resize((int(word.width * k), int(word.height * k)), Image.BICUBIC)
+    img.paste(w, ((W - w.width) // 2, H // 2 - w.height // 2 - 40), w)
+    p = prog(t, t0 + 0.08, 0.35)                            # sous-titre qui monte
+    if p > 0:
+        c = cap.copy()
+        c.putalpha(c.getchannel("A").point(lambda v: int(v * clamp(p * 2))))
+        img.paste(c, ((W - c.width) // 2, H // 2 + 60 + int(30 * e(p))), c)
+    p = out_expo(prog(t, t0 + 0.05, 0.35))                  # filet d'accent qui se trace
+    if p > 0:
+        bw = int(140 * p)
+        ImageDraw.Draw(img).rectangle(((W - bw) // 2, H // 2 - 170, (W + bw) // 2, H // 2 - 164),
+                                      fill=fg)
+    return img
+
+
+def titles_intro(t, ctx):
+    scenes = ctx["titles"]
+    cur = max(i for i, sc in enumerate(scenes) if t >= sc[0])
+    img = title_scene(t, scenes[cur])
+    if cur > 0:                                             # le nouvel écran pousse l'ancien
+        p = out_expo(prog(t, scenes[cur][0], 0.30))
+        if p < 1:
+            prev = title_scene(t, scenes[cur - 1])
+            canvas = Image.new("RGB", (W, H))
+            canvas.paste(prev, (int(-0.35 * W * p), 0))
+            canvas.paste(img, (int(W * (1 - p)), 0))
+            img = canvas
+    return img
+
+
+def titles_frame(t, f, L, ctx):
+    for name in ("logo", "pill", "role", "nsk", "card", "time"):
+        add_layer(f, L[name])
+    p = prog(t, IRIS_AT + 0.10, 0.55)
+    add_layer(f, L["name"], dy=75 * e(p), clip=True, alpha=1.0 if p > 0 else 0)
+    p = prog(t, IRIS_AT + 0.20, 0.70)
+    add_layer(f, L["device"], dy=80 * e(p) + float_bob(t, IRIS_AT + 0.9),
+              scale=0.94 + 0.06 * out_expo(p), alpha=clamp(p * 2))
+
+
+def titles_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 2.4, 0.7, t, ctx["name"], ICE, 0.85)
+    shine(f, SEGALA_BOXES["card"], 2.9, 0.8, t, ctx["card"], np.array([60, 110, 220], np.float32), 0.7)
+
+
+def titles_overlay(t, img, ctx):
+    q = prog(t, 3.3, 0.8)
+    if 0 < q < 1:
+        ring(img, (476, 333, 1019, 518), 20 * out_cubic(q), 0.75 * (1 - q), 22, 2, (255, 255, 255))
+
+
+def titles_camera(t):
+    return 1 + 0.12 * (1 - out_expo(prog(t, IRIS_AT, 1.0))), 0.0, 0.0
+
+
+def titles_post(t, img, ctx):
+    if t < IRIS_AT:
+        return titles_intro(t, ctx)
+    q = prog(t, IRIS_AT, 0.55)
+    if q >= 1:
+        return img
+    r = out_expo(q) * (math.hypot(W / 2, H / 2) + 20)
+    m = np.clip((r - ctx["dist"]) / 3, 0, 1)[..., None]
+    intro = np.asarray(titles_intro(t, ctx), np.float32)
+    out = intro * (1 - m) + np.asarray(img, np.float32) * m
+    edge = np.exp(-((ctx["dist"] - r) / 4) ** 2)[..., None] * (1 - q)
+    out += edge * (WHITE - out)
+    return Image.fromarray(np.clip(out, 0, 255).astype(np.uint8))
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -794,6 +910,12 @@ POSTERS = {
                          shine=sg_eclat_shine, overlay=sg_eclat_overlay,
                          background_fx=sg_eclat_background, camera=sg_eclat_camera,
                          intro_color=(255, 255, 255), intro_dur=0.22, dur=5.0),
+    "segala-titres": dict(src="assets/post-charlotte-segala.png",
+                          out="video/post-charlotte-segala-titres.mp4",
+                          src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=IRIS_AT + 0.45,
+                          setup=titles_setup, frame=titles_frame, shine=titles_shine,
+                          overlay=titles_overlay, camera=titles_camera, post=titles_post,
+                          intro_dur=0.001, dur=4.8),
 }
 
 
