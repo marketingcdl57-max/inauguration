@@ -105,7 +105,8 @@ def prepare(cfg):
         mask[y0:y1, x0:x1] = True
     mask[py:] = True
     plate = harmonic_fill(poster, mask)
-    plate[py:] = plate[py - 6]         # sous le bandeau : prolonge le fond (hors liseré de transition)
+    # sous le bandeau : couleur moyenne du bas du fond (sans liseré ni traînée verticale)
+    plate[py:] = plate[py - 6].mean(0)
     layers = {}
     for name, b in cfg["boxes"].items():
         x0, y0, x1, y1 = box(b)
@@ -650,7 +651,7 @@ POSTERS = {
                        src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.3, panel_ease="back",
                        setup=pop_setup, frame=pop_frame, shine=pop_shine, overlay=pop_overlay,
                        background_fx=pop_background, post=pop_post,
-                       intro_dur=0.001, dur=5.0, motion_blur=2.0),
+                       intro_dur=0.001, dur=5.0),
 }
 
 
