@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
@@ -9,6 +9,7 @@
   - segala  : « Charlotte SEGALA — Conférence NSK VCP2 », style épuré
   - segala-pop : même affiche, version plus vivante (vague, rebonds, lumières)
   - segala-pro : même affiche, version sobre et nette (ligne d'accent, ouvertures)
+  - segala-eclat : même affiche, version percutante sans flou (impacts, explosion)
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -671,6 +672,91 @@ def pro_camera(t):
     return z, 0.0, 0.0
 
 
+# --- même affiche, version « éclat » : percutante mais nette (sans flou) -------
+SG_IMPACTS = [(0.40, 331, 242, 0.6), (0.70, 747, 426, 1.0), (0.84, 167, 420, 0.5),
+              (1.15, 300, 790, 1.3), (1.62, 540, 1130, 0.35)]
+SG_COLORS = [(255, 255, 255), (170, 205, 255), (120, 175, 255), (175, 125, 255)]
+
+
+def sg_shock(t, decay):
+    return sum(k * math.exp(-(t - t0) / decay) for t0, _, _, k in SG_IMPACTS if t >= t0)
+
+
+def sg_eclat_setup(poster, plate):
+    ctx = segala_setup(poster, plate)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    dx, dy = xx - DEVICE_C[0], yy - DEVICE_C[1]
+    ctx["theta"] = np.arctan2(dy, dx)
+    ctx["radial"] = np.exp(-(np.hypot(dx, dy) / 520) ** 2)
+    ctx["sparks"] = (_particles(3, 85, DEVICE_C, 1.15, SG_COLORS) +
+                     _particles(4, 36, (747, 426), 0.70, SG_COLORS[:3], (250, 700)))
+    return ctx
+
+
+def sg_eclat_frame(t, f, L, ctx):
+    def slam(name, start, dur, s0, dy=0.0, bob=0.0):
+        p = prog(t, start, dur)
+        add_layer(f, L[name], scale=1 + (s0 - 1) * (1 - p) ** 2, dy=dy * (1 - p) ** 2 + bob,
+                  alpha=clamp(p * 3))
+
+    enter(f, L, t, "logo", 0.05, 0.40, dx=lambda p: -90 * e(p))
+    enter(f, L, t, "pill", 0.10, 0.40, dx=lambda p: 110 * e(p))
+    slam("name", 0.15, 0.25, 2.3)
+    enter(f, L, t, "role", 0.38, 0.35, dx=lambda p: -120 * e(p))
+    slam("card", 0.45, 0.25, 2.0)
+    slam("nsk", 0.62, 0.22, 1.9)
+    enter(f, L, t, "time", 0.78, 0.35, dy=lambda p: 50 * e(p))
+    slam("device", 0.85, 0.30, 1.7, dy=-80, bob=float_bob(t, 1.6))
+
+
+def sg_eclat_background(t, f, ctx):
+    segala_background(t, f, ctx)
+    if t < 1.15:
+        return
+    k = 0.5 * math.exp(-(t - 1.15) / 0.35) + 0.2 * out_cubic(prog(t, 1.15, 0.4))
+    rays = (0.5 + 0.5 * np.cos(14 * ctx["theta"] + 0.6 * t)) ** 6
+    a = (rays * ctx["radial"] * k * ctx["bg"])[..., None]
+    f += a * (np.array([200, 222, 255], np.float32) - f)
+
+
+def sg_eclat_overlay(t, img, ctx):
+    d = ImageDraw.Draw(img, "RGBA")
+    for t0, cx, cy, k in SG_IMPACTS[:4]:              # ondes de choc
+        q = prog(t, t0, 0.45)
+        if 0 < q < 1:
+            r = 30 + 330 * k * out_cubic(q)
+            d.ellipse((cx - r, cy - r, cx + r, cy + r),
+                      outline=(255, 255, 255, int(200 * (1 - q))), width=max(1, int(8 * (1 - q))))
+    q = prog(t, 1.15, 0.3)                            # éclair à l'arrivée de l'appareil
+    if 0 < q < 1:
+        img.alpha_composite(Image.new("RGBA", img.size, (255, 255, 255, int(100 * (1 - q) ** 2))))
+    for s in ctx["sparks"]:                           # particules
+        dt = t - s["t0"]
+        if not 0 < dt < s["life"]:
+            continue
+        travel = s["v"] * (1 - math.exp(-3 * dt)) / 3
+        x = s["x"] + math.cos(s["a"]) * travel
+        y = s["y"] + math.sin(s["a"]) * travel + 260 * dt * dt
+        fade = 1 - dt / s["life"]
+        r = s["r"] * (0.4 + 0.6 * fade)
+        d.ellipse((x - r, y - r, x + r, y + r), fill=(*s["c"], int(255 * fade)))
+    q = prog(t, 2.3, 0.8)
+    if 0 < q < 1:
+        ring(img, (476, 333, 1019, 518), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (255, 255, 255))
+
+
+def sg_eclat_shine(t, f, ctx):
+    shine(f, SEGALA_BOXES["name"], 1.9, 0.6, t, ctx["name"], ICE, 0.9)
+    shine(f, SEGALA_BOXES["card"], 2.5, 0.7, t, ctx["card"], np.array([60, 110, 220], np.float32), 0.7)
+
+
+def sg_eclat_camera(t):
+    z = 1 + 0.30 * (1 - out_expo(prog(t, 0, 1.0)))   # dézoom éclair
+    a = 9 * sg_shock(t, 0.09)                           # tremblement court et léger
+    z = max(z, 1 + 0.02 * min(1, a / 4)) if a > 0.05 else z
+    return z, a * math.sin(t * 97), a * math.cos(t * 71)
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -701,6 +787,13 @@ POSTERS = {
                        setup=segala_setup, frame=pro_frame, shine=pro_shine,
                        overlay=lambda t, img, ctx: None, camera=pro_camera,
                        intro_color=NAVY, intro_dur=0.35, dur=4.5),
+    "segala-eclat": dict(src="assets/post-charlotte-segala.png",
+                         out="video/post-charlotte-segala-eclat.mp4",
+                         src_w=1080, boxes=SEGALA_BOXES, panel_y=1003, panel_in=1.2,
+                         panel_ease="back", setup=sg_eclat_setup, frame=sg_eclat_frame,
+                         shine=sg_eclat_shine, overlay=sg_eclat_overlay,
+                         background_fx=sg_eclat_background, camera=sg_eclat_camera,
+                         intro_color=(255, 255, 255), intro_dur=0.22, dur=5.0),
 }
 
 
