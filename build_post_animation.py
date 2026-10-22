@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres|segala-naturel] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres|segala-naturel|leo] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
@@ -12,6 +12,7 @@
   - segala-eclat : même affiche, version percutante sans flou (impacts, explosion)
   - segala-titres : même affiche, intro typographique puis ouverture en cercle
   - segala-naturel : même affiche, profondeur (parallaxe) et mouvements souples
+  - leo     : « Léo METZINGER — Conférence Oxygénothérapie », bulles d'oxygène
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -940,6 +941,106 @@ def nat_camera(t):
     return 1 + 0.02 * (1 - in_out(prog(t, 0, 3.6))), 0.0, 0.0
 
 
+# --- affiche « Léo METZINGER — Conférence Oxygénothérapie » -------------------
+# Thème de la conférence : l'oxygène. Des bulles nettes s'échappent de la
+# bouteille et montent dans le fond (certaines marquées « O₂ »), les éléments
+# arrivent comme portés par l'air, et l'affiche « respire » sur un cycle complet.
+LEO_BOXES = {                      # pixels de l'affiche 1080x1350
+    "logo":    (20, 30, 418, 182),
+    "pill":    (484, 58, 1036, 146),
+    "name":    (30, 205, 570, 278),
+    "role":    (30, 290, 282, 342),
+    "labodal": (32, 364, 405, 465),
+    "card":    (472, 328, 1024, 466),
+    "time":    (572, 474, 916, 546),
+    "kit":     (85, 575, 425, 1003),
+    "bottle":  (425, 660, 512, 1003),
+    "photo":   (728, 572, 1080, 1003),
+}
+VALVE = (462, 668)
+BREATH_AT, BREATH_LEN = 1.8, 3.2
+LEO_ENTRIES = [  # (calque, début, montée en px, arrivée latérale en px)
+    ("logo", 0.10, 0, -50), ("pill", 0.18, 0, 60), ("name", 0.30, 40, 0), ("role", 0.45, 30, 0),
+    ("labodal", 0.55, 34, 0), ("card", 0.65, 40, 0), ("time", 0.80, 30, 0),
+    ("kit", 0.90, 70, 0), ("photo", 0.95, 0, 80), ("bottle", 1.00, 90, 0),
+]
+
+
+def leo_setup(poster, plate):
+    rng = np.random.default_rng(11)
+    bubbles = []
+    for i in range(int((DUR - 1.25) / 0.045)):               # filet continu depuis la valve
+        bubbles.append(dict(t0=1.25 + i * 0.045, x=VALVE[0] + rng.uniform(-5, 5), y=VALVE[1],
+                            r=rng.uniform(3, 10), v=rng.uniform(150, 260),
+                            sway=rng.uniform(6, 22), f=rng.uniform(1.2, 2.4), ph=rng.uniform(0, 6.3),
+                            o2=False))
+    for i in range(34):                                      # bulles d'ambiance depuis le bas
+        r = rng.uniform(7, 26)
+        bubbles.append(dict(t0=rng.uniform(-3.0, 4.2), x=rng.uniform(30, W - 30), y=1010 + r,
+                            r=r, v=rng.uniform(110, 210), sway=rng.uniform(8, 26),
+                            f=rng.uniform(0.6, 1.4), ph=rng.uniform(0, 6.3), o2=r > 18))
+    font = ImageFont.truetype(os.path.join(FONT_DIR, "InterDisplay-SemiBold.otf"), 40)
+    return dict(name=glyph_mask(poster, LEO_BOXES["name"], lambda r: (r.min(-1) - 200) / 40),
+                bg=bg_mask(poster, plate), bubbles=bubbles, font=font)
+
+
+def leo_frame(t, f, L, ctx):
+    for name, start, rise, side in LEO_ENTRIES:
+        p = prog(t, start, 0.9)
+        if p <= 0:
+            continue
+        sway = 6 * math.sin(7 * p) * (1 - p) if rise else 0.0       # porté par l'air
+        bob = float_bob(t, 2.0) if name == "bottle" else 0.0
+        add_layer(f, L[name], dx=side * (1 - out_expo(p)) + sway,
+                  dy=rise * (1 - spring(p)) + bob, alpha=clamp(p * 1.8))
+
+
+def leo_bubbles(t, f, ctx):
+    """Bulles dessinées en 2x (bords nets), passées derrière les éléments."""
+    S = 2
+    ov = Image.new("RGBA", (W * S, H * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    for b in ctx["bubbles"]:
+        dt = t - b["t0"]
+        if dt <= 0:
+            continue
+        y = b["y"] - b["v"] * dt
+        if y < -40:
+            continue
+        x = b["x"] + b["sway"] * math.sin(b["f"] * dt * 2 * math.pi + b["ph"]) * min(1, dt * 2)
+        r = b["r"] * (1 + 0.35 * min(1, dt / 2.5)) * min(1, dt * 6)   # grossit en montant
+        if r < 1:
+            continue
+        X, Y, R = x * S, y * S, r * S
+        d.ellipse((X - R, Y - R, X + R, Y + R), fill=(255, 255, 255, 40),
+                  outline=(255, 255, 255, 210), width=max(2, int(R * 0.12)))
+        h = R * 0.32                                            # reflet
+        d.ellipse((X - R * 0.55 - h, Y - R * 0.5 - h * 0.7, X - R * 0.55 + h, Y - R * 0.5 + h * 0.7),
+                  fill=(255, 255, 255, 220))
+        if b["o2"]:
+            d.text((X, Y + R * 0.08), "O₂", font=ctx["font"], fill=(255, 255, 255, 235), anchor="mm")
+    ov = np.asarray(ov.resize((W, H), Image.LANCZOS), np.float32)
+    a = (ov[..., 3] / 255 * ctx["bg"])[..., None]
+    f *= 1 - a
+    f += a * ov[..., :3]
+
+
+def leo_shine(t, f, ctx):
+    shine(f, LEO_BOXES["name"], 2.4, 0.8, t, ctx["name"], np.array([200, 245, 255], np.float32), 0.8)
+
+
+def leo_overlay(t, img, ctx):
+    # onde « inspiration » autour de la carte, au rythme de la respiration
+    q = prog(t, BREATH_AT + 0.1, 1.4)
+    if 0 < q < 1:
+        ring(img, (476, 333, 1019, 461), 34 * out_cubic(q), 0.75 * (1 - q), 22, 3, (255, 255, 255))
+
+
+def leo_camera(t):
+    breath = 0.5 - 0.5 * math.cos(2 * math.pi * prog(t, BREATH_AT, BREATH_LEN))
+    return 1 + 0.03 * (1 - out_expo(prog(t, 0, 1.4))) + 0.014 * breath, 0.0, 0.0
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -990,6 +1091,11 @@ POSTERS = {
                            shine=nat_shine, overlay=lambda t, img, ctx: None,
                            background_fx=nat_background, camera=nat_camera,
                            intro_color=NAVY, intro_dur=0.5, dur=5.0),
+    "leo": dict(src="assets/post-leo-metzinger.webp", out="video/post-leo-metzinger-anime.mp4",
+                src_w=1080, boxes=LEO_BOXES, panel_y=1003, panel_in=1.4, panel_dur=0.8,
+                setup=leo_setup, frame=leo_frame, background_fx=leo_bubbles,
+                shine=leo_shine, overlay=leo_overlay, camera=leo_camera,
+                intro_color=(255, 255, 255), intro_dur=0.4, dur=5.0),
 }
 
 
