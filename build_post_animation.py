@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Anime les affiches des travaux pratiques de la journée d'inauguration.
 
-    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres|segala-naturel|leo] [sortie.mp4]
+    python3 build_post_animation.py [collage|lea|lea-eclat|segala|segala-pop|segala-pro|segala-eclat|segala-titres|segala-naturel|leo|mignot] [sortie.mp4]
 
   - collage : « Travaux pratiques — Collage » (atelier G-CEM ONE™ / GC)
   - lea     : « Léa FERRAND — TP Collage », version avec photo
@@ -13,6 +13,7 @@
   - segala-titres : même affiche, intro typographique puis ouverture en cercle
   - segala-naturel : même affiche, profondeur (parallaxe) et mouvements souples
   - leo     : « Léo METZINGER — Conférence Oxygénothérapie », flux d'oxygène et pouls
+  - mignot  : « Roger MIGNOT — Conférence VITA ENAMIC », scan CAD/CAM et réseau hybride
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -1076,6 +1077,141 @@ def leo_camera(t):
     return 1 + 0.03 * (1 - out_expo(prog(t, 0, 1.4))) + 0.014 * breath, 0.0, 0.0
 
 
+# --- affiche « Roger MIGNOT — Conférence VITA ENAMIC » ------------------------
+# Thème : VITA ENAMIC, céramique hybride usinée en CAD/CAM. Le produit apparaît
+# en contour filaire puis un faisceau de scan le révèle ; dans le fond, deux
+# réseaux entrelacés (céramique + polymère) se tracent depuis le produit, puis
+# une onde lumineuse les parcourt.
+MIGNOT_BOXES = {                   # pixels de l'affiche 1080x1350
+    "logo": (20, 30, 418, 182),
+    "pill": (484, 58, 1036, 146),
+    "name": (30, 205, 522, 278),
+    "role": (30, 290, 282, 342),
+    "vita": (90, 365, 345, 470),
+    "card": (484, 340, 1036, 478),
+    "time": (572, 486, 916, 558),
+    "prod": (140, 650, 690, 905),
+}
+MAGENTA = np.array([190, 20, 100], np.float32)
+PROD_O = (415, 775)
+SCAN_AT, SCAN_LEN = 1.3, 1.0
+MIGNOT_ENTRIES = [("logo", 0.10, 0, -50), ("pill", 0.18, 0, 60), ("name", 0.30, 40, 0),
+                  ("role", 0.45, 30, 0), ("vita", 0.55, 34, 0), ("card", 0.65, 40, 0),
+                  ("time", 0.80, 30, 0)]
+
+
+def mignot_setup(poster, plate):
+    # contour filaire du produit (avant le scan)
+    x0, y0, x1, y1 = MIGNOT_BOXES["prod"]
+    crop = Image.fromarray(poster[y0:y1, x0:x1].astype(np.uint8)).convert("L")
+    edges = np.asarray(crop.filter(ImageFilter.FIND_EDGES), np.float32)
+    wire = np.clip((edges - 25) / 50, 0, 1)
+    # deux réseaux triangulaires entrelacés, légèrement irréguliers
+    rng = np.random.default_rng(5)
+    nets = []
+    for off, color, alpha in ((0.0, (255, 255, 255), 0.30), (0.5, (190, 20, 100), 0.34)):
+        step, rows = 96, {}
+        for j in range(-1, 12):
+            for i in range(-1, 13):
+                x = (i + off + 0.5 * (j % 2)) * step + rng.uniform(-12, 12)
+                y = (j + off) * step * 0.87 + rng.uniform(-12, 12)
+                rows[i, j] = (x, y)
+        edges_ = []
+        for (i, j), a in rows.items():
+            for di, dj in ((1, 0), (j % 2, 1), (j % 2 - 1, 1)):
+                b = rows.get((i + di, j + dj))
+                if b is None:
+                    continue
+                mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+                da, db = math.hypot(a[0] - PROD_O[0], a[1] - PROD_O[1]), math.hypot(b[0] - PROD_O[0], b[1] - PROD_O[1])
+                near, far = (a, b) if da < db else (b, a)
+                edges_.append((near, far, math.hypot(mx - PROD_O[0], my - PROD_O[1])))
+        nets.append((edges_, color, alpha))
+    # le réseau reste discret en haut (zone des textes), plus présent autour du produit
+    vfade = np.clip((np.arange(H, dtype=np.float32) - 250) / 450, 0.3, 1)[:, None]
+    return dict(name=glyph_mask(poster, MIGNOT_BOXES["name"], lambda r: (r.min(-1) - 210) / 35),
+                bg=bg_mask(poster, plate) * vfade, wire=wire, nets=nets)
+
+
+def mignot_frame(t, f, L, ctx):
+    for name, start, rise, side in MIGNOT_ENTRIES:
+        p = prog(t, start, 0.9)
+        if p > 0:
+            add_layer(f, L[name], dx=side * (1 - out_expo(p)), dy=rise * (1 - spring(p)),
+                      alpha=clamp(p * 1.8))
+
+
+def mignot_background(t, f, ctx):
+    """Réseau hybride (derrière les éléments), puis produit filaire révélé par le scan."""
+    S = 2
+    ov = Image.new("RGBA", (W * S, H * S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    maxd = 1100.0
+    for edges_, color, alpha in ctx["nets"]:
+        for (ax, ay), (bx, by), dist in edges_:
+            p = prog(t, 0.9 + 1.4 * dist / maxd, 0.3)            # se trace depuis le produit
+            if p <= 0:
+                continue
+            boost = 0.0
+            if t > 3.0:                                            # onde lumineuse
+                boost = math.exp(-((dist - (t - 3.0) * 650) / 70) ** 2)
+            a = int(255 * min(1.0, alpha + 0.6 * boost))
+            q = out_cubic(p)
+            ex, ey = ax + (bx - ax) * q, ay + (by - ay) * q
+            d.line((ax * S, ay * S, ex * S, ey * S), fill=(*color, a), width=int(S * (1.4 + boost)))
+            if p >= 1:
+                r = S * (2.6 + 2 * boost)
+                d.ellipse((bx * S - r, by * S - r, bx * S + r, by * S + r), fill=(*color, a))
+    ov = np.asarray(ov.resize((W, H), Image.LANCZOS), np.float32)
+    a = (ov[..., 3] / 255 * ctx["bg"])[..., None]
+    f *= 1 - a
+    f += a * ov[..., :3]
+
+
+def mignot_scan(t, f, L, ctx):
+    x0, y0, d = L["prod"]
+    h, w = d.shape[:2]
+    p = prog(t, SCAN_AT, SCAN_LEN)
+    yb = y0 + in_out(p) * h                                    # position du faisceau
+    ys = np.arange(h) + y0
+    shown = np.clip((yb - ys) / 6 + 0.5, 0, 1)[:, None, None]
+    region = f[y0:y0 + h, x0:x0 + w]
+    region += d * shown                                        # partie déjà scannée : le vrai produit
+    k = out_cubic(prog(t, 1.0, 0.3)) * (1 - out_cubic(prog(t, SCAN_AT + SCAN_LEN, 0.3)))
+    if k > 0:                                                  # partie à venir : contour filaire
+        a = (ctx["wire"] * 0.85 * k)[..., None] * (1 - shown)
+        region += a * (WHITE - region)
+    if 0 < p < 1:                                              # faisceau : cœur blanc, halo magenta
+        gx0, gx1 = max(0, x0 - 40), min(W, x0 + w + 40)
+        yy = np.arange(max(0, int(yb) - 30), min(H, int(yb) + 30))
+        glow = np.exp(-((yy - yb) / 12) ** 2)[:, None, None]
+        core = np.exp(-((yy - yb) / 1.6) ** 2)[:, None, None]
+        xs = np.arange(gx0, gx1)
+        taper = np.clip(np.minimum(xs - gx0, gx1 - xs) / 40, 0, 1)[None, :, None]
+        reg = f[yy[0]:yy[-1] + 1, gx0:gx1]
+        reg += glow * taper * 0.55 * (MAGENTA - reg)
+        reg += core * taper * (WHITE - reg)
+
+
+def mignot_frame_all(t, f, L, ctx):
+    mignot_frame(t, f, L, ctx)
+    mignot_scan(t, f, L, ctx)
+
+
+def mignot_shine(t, f, ctx):
+    shine(f, MIGNOT_BOXES["name"], 2.6, 0.8, t, ctx["name"], np.array([235, 120, 175], np.float32), 0.85)
+
+
+def mignot_overlay(t, img, ctx):
+    q = prog(t, 3.4, 0.9)
+    if 0 < q < 1:
+        ring(img, (489, 345, 1031, 473), 22 * out_cubic(q), 0.8 * (1 - q), 22, 3, (190, 20, 100))
+
+
+def mignot_camera(t):
+    return 1 + 0.03 * (1 - out_expo(prog(t, 0, 1.6))), 0.0, 0.0
+
+
 POSTERS = {
     "collage": dict(src="assets/post-collage.webp", out="video/post-collage-anime.mp4",
                     src_w=1600, boxes=COLLAGE_BOXES, panel_y=1515, panel_in=1.25,
@@ -1131,6 +1267,11 @@ POSTERS = {
                 setup=leo_setup, frame=leo_frame, background_fx=leo_oxygen,
                 shine=leo_shine, overlay=leo_overlay, camera=leo_camera,
                 intro_color=(255, 255, 255), intro_dur=0.4, dur=5.0),
+    "mignot": dict(src="assets/post-roger-mignot.png", out="video/post-roger-mignot-anime.mp4",
+                   src_w=1080, boxes=MIGNOT_BOXES, panel_y=1003, panel_in=1.6, panel_dur=0.8,
+                   setup=mignot_setup, frame=mignot_frame_all, background_fx=mignot_background,
+                   shine=mignot_shine, overlay=mignot_overlay, camera=mignot_camera,
+                   intro_color=(255, 255, 255), intro_dur=0.4, dur=5.0),
 }
 
 
