@@ -12,7 +12,7 @@
   - segala-eclat : même affiche, version percutante sans flou (impacts, explosion)
   - segala-titres : même affiche, intro typographique puis ouverture en cercle
   - segala-naturel : même affiche, profondeur (parallaxe) et mouvements souples
-  - leo     : « Léo METZINGER — Conférence Oxygénothérapie », bulles d'oxygène
+  - leo     : « Léo METZINGER — Conférence Oxygénothérapie », flux d'oxygène et pouls
 
 Format 4:5 1080x1350 (post Instagram / Facebook / LinkedIn), 60 i/s,
 6 s pour « collage », 4,5 s pour « lea ».
@@ -942,9 +942,10 @@ def nat_camera(t):
 
 
 # --- affiche « Léo METZINGER — Conférence Oxygénothérapie » -------------------
-# Thème de la conférence : l'oxygène. Des bulles nettes s'échappent de la
-# bouteille et montent dans le fond (certaines marquées « O₂ »), les éléments
-# arrivent comme portés par l'air, et l'affiche « respire » sur un cycle complet.
+# Thème de la conférence : l'oxygénothérapie. Des flux d'oxygène lumineux
+# sortent de la valve de la bouteille et montent vers la carte, un tracé de
+# pouls (moniteur) traverse l'affiche, les éléments arrivent comme portés par
+# l'air, et l'affiche « respire » sur un cycle complet.
 LEO_BOXES = {                      # pixels de l'affiche 1080x1350
     "logo":    (20, 30, 418, 182),
     "pill":    (484, 58, 1036, 146),
@@ -966,22 +967,34 @@ LEO_ENTRIES = [  # (calque, début, montée en px, arrivée latérale en px)
 ]
 
 
+def bezier(p0, p1, p2, p3, n=160):
+    u = np.linspace(0, 1, n)[:, None]
+    pts = ((1 - u) ** 3 * np.array(p0) + 3 * (1 - u) ** 2 * u * np.array(p1) +
+           3 * (1 - u) * u ** 2 * np.array(p2) + u ** 3 * np.array(p3))
+    return pts
+
+
+def ecg_y(x, y0=560.0, period=270.0):
+    """Tracé de pouls : onde P, complexe QRS, onde T, sur une ligne de base."""
+    u = (x % period) / period
+    g = lambda c, w, a: a * math.exp(-((u - c) / w) ** 2)
+    return y0 - g(0.30, 0.025, 8) + g(0.42, 0.010, 14) - g(0.45, 0.012, 52) + g(0.48, 0.010, 22) \
+        - g(0.66, 0.040, 14)
+
+
 def leo_setup(poster, plate):
-    rng = np.random.default_rng(11)
-    bubbles = []
-    for i in range(int((DUR - 1.25) / 0.045)):               # filet continu depuis la valve
-        bubbles.append(dict(t0=1.25 + i * 0.045, x=VALVE[0] + rng.uniform(-5, 5), y=VALVE[1],
-                            r=rng.uniform(3, 10), v=rng.uniform(150, 260),
-                            sway=rng.uniform(6, 22), f=rng.uniform(1.2, 2.4), ph=rng.uniform(0, 6.3),
-                            o2=False))
-    for i in range(34):                                      # bulles d'ambiance depuis le bas
-        r = rng.uniform(7, 26)
-        bubbles.append(dict(t0=rng.uniform(-3.0, 4.2), x=rng.uniform(30, W - 30), y=1010 + r,
-                            r=r, v=rng.uniform(110, 210), sway=rng.uniform(8, 26),
-                            f=rng.uniform(0.6, 1.4), ph=rng.uniform(0, 6.3), o2=r > 18))
-    font = ImageFont.truetype(os.path.join(FONT_DIR, "InterDisplay-SemiBold.otf"), 40)
+    # courants d'oxygène : de la valve vers la carte « Oxygénothérapie »
+    flows = []
+    for i, (spread, lift) in enumerate([(-40, 0), (0, 20), (40, 40), (80, 10), (120, 50), (160, 30)]):
+        flows.append(dict(pts=bezier((VALVE[0] + 2 * i - 5, VALVE[1] - 6),
+                                     (VALVE[0] - 10 + spread * 0.2, 560 - lift),
+                                     (560 + spread, 600 - lift * 2),
+                                     (600 + spread * 1.6, 470 - lift)),
+                          phase=i * 0.27, period=1.5 + 0.12 * i, width=2.2 + (i % 3) * 0.8))
+    xs = np.arange(0, W + 1, 2, dtype=np.float32)
+    ecg = np.array([(x, ecg_y(x)) for x in xs], np.float32)
     return dict(name=glyph_mask(poster, LEO_BOXES["name"], lambda r: (r.min(-1) - 200) / 40),
-                bg=bg_mask(poster, plate), bubbles=bubbles, font=font)
+                bg=bg_mask(poster, plate), flows=flows, ecg=ecg)
 
 
 def leo_frame(t, f, L, ctx):
@@ -995,30 +1008,52 @@ def leo_frame(t, f, L, ctx):
                   dy=rise * (1 - spring(p)) + bob, alpha=clamp(p * 1.8))
 
 
-def leo_bubbles(t, f, ctx):
-    """Bulles dessinées en 2x (bords nets), passées derrière les éléments."""
+def leo_oxygen(t, f, ctx):
+    """Flux d'oxygène et tracé de pouls, dessinés en 2x, passés derrière les éléments."""
     S = 2
     ov = Image.new("RGBA", (W * S, H * S), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
-    for b in ctx["bubbles"]:
-        dt = t - b["t0"]
-        if dt <= 0:
+    # flux : des traînées qui glissent le long des courbes, queue qui s'efface
+    k_in = out_cubic(prog(t, 1.25, 0.6))
+    for fl in ctx["flows"]:
+        if k_in <= 0:
+            break
+        pts, n = fl["pts"], len(fl["pts"])
+        for rep_ in range(2):                                   # deux traînées par courant
+            head = ((t - 1.25) / fl["period"] + fl["phase"] + rep_ * 0.5) % 1.0 * 1.4
+            i1 = int(min(n - 1, head * n))
+            i0 = int(max(0, (head - 0.35) * n))
+            if i1 - i0 < 2:
+                continue
+            for j in range(i0, i1):
+                q = (j - i0) / max(1, i1 - i0)                   # 0 = queue, 1 = tête
+                fade_end = 1 - clamp((j / n - 0.85) / 0.15)      # s'efface en arrivant
+                a = int(230 * q * fade_end * k_in)
+                if a <= 2:
+                    continue
+                (x0, y0), (x1, y1) = pts[j] * S, pts[j + 1] * S
+                d.line((x0, y0, x1, y1), fill=(255, 255, 255, a),
+                       width=max(2, int(fl["width"] * S * (0.5 + 0.5 * q))))
+    # tracé de pouls : la tête lumineuse balaie l'affiche, la trace s'efface derrière
+    for start in (1.15, 3.05):
+        p = prog(t, start, 1.7)
+        if p <= 0 or p >= 1 and t > start + 2.4:
             continue
-        y = b["y"] - b["v"] * dt
-        if y < -40:
-            continue
-        x = b["x"] + b["sway"] * math.sin(b["f"] * dt * 2 * math.pi + b["ph"]) * min(1, dt * 2)
-        r = b["r"] * (1 + 0.35 * min(1, dt / 2.5)) * min(1, dt * 6)   # grossit en montant
-        if r < 1:
-            continue
-        X, Y, R = x * S, y * S, r * S
-        d.ellipse((X - R, Y - R, X + R, Y + R), fill=(255, 255, 255, 40),
-                  outline=(255, 255, 255, 210), width=max(2, int(R * 0.12)))
-        h = R * 0.32                                            # reflet
-        d.ellipse((X - R * 0.55 - h, Y - R * 0.5 - h * 0.7, X - R * 0.55 + h, Y - R * 0.5 + h * 0.7),
-                  fill=(255, 255, 255, 220))
-        if b["o2"]:
-            d.text((X, Y + R * 0.08), "O₂", font=ctx["font"], fill=(255, 255, 255, 235), anchor="mm")
+        xh = p * (W + 40)
+        ecg = ctx["ecg"]
+        fade_all = 1 - clamp((t - start - 1.7) / 0.6)
+        seg = ecg[(ecg[:, 0] <= xh) & (ecg[:, 0] >= xh - 620)]
+        for j in range(len(seg) - 1):
+            q = 1 - (xh - seg[j, 0]) / 620
+            a = int(235 * q * fade_all)
+            if a > 2:
+                d.line((seg[j, 0] * S, seg[j, 1] * S, seg[j + 1, 0] * S, seg[j + 1, 1] * S),
+                       fill=(255, 255, 255, a), width=3 * S)
+        if p < 1:
+            yh = ecg_y(xh) * S
+            for r, a in ((16, 60), (9, 140), (5, 255)):
+                d.ellipse((xh * S - r * S / 2, yh - r * S / 2, xh * S + r * S / 2, yh + r * S / 2),
+                          fill=(255, 255, 255, a))
     ov = np.asarray(ov.resize((W, H), Image.LANCZOS), np.float32)
     a = (ov[..., 3] / 255 * ctx["bg"])[..., None]
     f *= 1 - a
@@ -1093,7 +1128,7 @@ POSTERS = {
                            intro_color=NAVY, intro_dur=0.5, dur=5.0),
     "leo": dict(src="assets/post-leo-metzinger.webp", out="video/post-leo-metzinger-anime.mp4",
                 src_w=1080, boxes=LEO_BOXES, panel_y=1003, panel_in=1.4, panel_dur=0.8,
-                setup=leo_setup, frame=leo_frame, background_fx=leo_bubbles,
+                setup=leo_setup, frame=leo_frame, background_fx=leo_oxygen,
                 shine=leo_shine, overlay=leo_overlay, camera=leo_camera,
                 intro_color=(255, 255, 255), intro_dur=0.4, dur=5.0),
 }
